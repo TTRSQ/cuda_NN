@@ -87,14 +87,6 @@ static void matrixMul_gpu(matrix& d_m_in, matrix& d_m_ac){
 
   matrixMul<<<gld, blk>>>(d_m_in, d_m_ac, d_ans);
 
-  matrix A;
-  A.height = 2;
-  A.width = 2;
-  A.elements = new float[A.height*A.width];
-  cudaMemcpy(A.elements, d_m_ac.elements, size, cudaMemcpyDeviceToHost);
-  std::cout << "matrix:actcpy =" << std::endl;
-  printMatrix(A);
-
   //不要になった入力のメモリの開放
   cudaFree(d_m_in.elements);
 
@@ -128,11 +120,7 @@ void randomInit(matrix m, int maxVal){
   for(int i = 0; i < m.height*m.width; i++) m.elements[i] = maxVal*(float(rand())/RAND_MAX) - maxVal/2.0;
 }
 
-__gloval__ void name(matrix a) {
-
-}
-
-void checkFunction(){
+void checkFunction(void (*func)(matrix&, matrix&)){
   matrix A, B;
   A.height = A.width = 2;
   B.height = B.width = 2;
@@ -153,41 +141,26 @@ void checkFunction(){
   dA.width = A.width; dA.height = A.height;
   dB.width = B.width; dB.height = B.height;
 
-  int a;
-  &a
-
-  int *a;
-  *a = 1;
-  a = 1が入ってるアドレス
-  int b = 2;
-  a = &b;
-  &a//=2
-
   int size = dA.width*dA.height*sizeof(float);
   cudaMalloc((void**)&dA.elements, size);
   cudaMemcpy(dA.elements, A.elements, size, cudaMemcpyHostToDevice);
 
-  cudaMemcpy(B.elements, dA.elements, size, cudaMemcpyDeviceToHost);
+  size = dB.width*dB.height*sizeof(float);
+  cudaMalloc((void**)&dB.elements, size);
+  cudaMemcpy(dB.elements, B.elements, size, cudaMemcpyHostToDevice);
 
-  std::cout << "matrix:B =" << std::endl;
-  printMatrix(B);
+  func(dA, dB);
 
-  // size = dB.width*dB.height*sizeof(float);
-  // cudaMalloc((void**)&dB.elements, size);
-  // cudaMemcpy(dB.elements, B.elements, size, cudaMemcpyHostToDevice);
-  //
-  // func(dA, dB);
-  //
-  // cudaMemcpy(A.elements, dA.elements, size, cudaMemcpyDeviceToHost);
-  // std::cout << "matrix:ans =" << std::endl;
-  // printMatrix(A);
-  //
-  // // ホストメモリ解放
-  // delete [] A.elements;
-  // delete [] B.elements;
+  cudaMemcpy(A.elements, dA.elements, size, cudaMemcpyDeviceToHost);
+  std::cout << "matrix:ans =" << std::endl;
+  printMatrix(A);
+
+  // ホストメモリ解放
+  delete [] A.elements;
+  delete [] B.elements;
 }
 
 int main(){
-  checkFunction();
+  checkFunction(matrixMul_gpu);
   return 0;
 }
