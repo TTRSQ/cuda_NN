@@ -44,14 +44,14 @@ void printMatrix(matrix M){
   std::cout << std::endl;
 }
 
-__global__ void matrixAdd(matrix A, matrix B, matrix C){
+__global__ void matrixAdd(matrix M, matrix add){
   //行列Cにおけるどこを計算するスレッドか確定する。
   int row = blockIdx.y*blockDim.y + threadIdx.y;
   int col = blockIdx.x*blockDim.x + threadIdx.x;
 
   //計算が必要なスレッドか確認
-  if(row < C.height && col < C.width){
-    C.elements[row*C.width+col] = A.elements[row*A.width+col] + B.elements[row*B.width+col];
+  if(row < M.height && col < M.width){
+    M.elements[row*M.width+col] += add.elements[row*add.width+col];
   }
 }
 
@@ -71,105 +71,50 @@ __global__ void matrixMul(matrix A, matrix B, matrix C){
   }
 }
 
-__global__ void matrixBias(matrix A, matrix B, matrix C){
-  //行列Cにおけるどこを計算するスレッドか確定する。
-  int row = blockIdx.y*blockDim.y + threadIdx.y;
-  int col = blockIdx.x*blockDim.x + threadIdx.x;
-
-  //計算が必要なスレッドか確認
-  if(row < C.height && col < C.width){
-    float x = 0.0f;
-    for (int i = 0; i < A.width; i++) {
-      x += A.elements[row*A.width+i]*B.elements[i*B.width+col];
-    }
-
-    C.elements[row*C.width+col] = x;
-  }
-}
-
-__global__ void matrixRelu(matrix A, matrix B, matrix C){
-  //行列Cにおけるどこを計算するスレッドか確定する。
-  int row = blockIdx.y*blockDim.y + threadIdx.y;
-  int col = blockIdx.x*blockDim.x + threadIdx.x;
-
-  //計算が必要なスレッドか確認
-  if(row < C.height && col < C.width){
-    float x = 0.0f;
-    for (int i = 0; i < A.width; i++) {
-      x += A.elements[row*A.width+i]*B.elements[i*B.width+col];
-    }
-
-    C.elements[row*C.width+col] = x;
-  }
-}
-
-
-
-matrix matrixMul_gpu(matrix A, matrix B){
-  matrix C;
-  C.height = A.height;
-  C.width = B.width;
-  C.elements = new float[C.height*C.width];
+void matrixMul_gpu(matrix m_in, matrix m_ac){
+  matrix ans;
+  ans.height = m_in.height;
+  ans.width = m_ac.width;
+  ans.elements = new float[ans.height*ans.width];
   //デバイス要変数の用意
-  matrix dA, dB, dC;
-  dA.width = A.width; dA.height = A.height;
-  dB.width = B.width; dB.height = B.height;
-  dC.width = C.width; dC.height = C.height;
+  matrix d_ans;
+  d_ans.width = ans.width; d_ans.height = ans.height;
 
   int size;
-  // デバイスメモリの確保とホストからの転送
-  size = dA.width*dA.height*sizeof(float);
-  cudaMalloc((void**)&dA.elements, size);
-  cudaMemcpy(dA.elements, A.elements, size, cudaMemcpyHostToDevice);
-
-  size = dB.width*dB.height*sizeof(float);
-  cudaMalloc((void**)&dB.elements, size);
-  cudaMemcpy(dB.elements, B.elements, size, cudaMemcpyHostToDevice);
-
-  //Cは計算前なのでコピー不要
-  size = dC.width*dC.height*sizeof(float);
-  cudaMalloc((void**)&dC.elements, size);
+  //デバイスにメモリ確保
+  size = d_ans.width*d_ans.height*sizeof(float);
+  cudaMalloc((void**)&d_ans.elements, size);
 
   //Cのサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 gld((C.width-1+blk.x)/blk.x, (C.height-1+blk.y)/blk.y);
+  dim3 gld((ans.width-1+blk.x)/blk.x, (ans.height-1+blk.y)/blk.y);
 
-  matrixMul<<<gld, blk>>>(dA, dB, dC);
+  matrixMul<<<gld, blk>>>(m_in, m_ac, d_ans);
 
-  //sizeはそのまま
-  cudaMemcpy(C.elements, dC.elements, size, cudaMemcpyDeviceToHost);
-
-  //デバイスのメモリ解放
-  cudaFree(dA.elements);
-  cudaFree(dB.elements);
-  cudaFree(dC.elements);
-  return C;
+  //不要になった入力のメモリの開放
+  cudaFree(m_in.elements);
+  
 }
 
-matrix matrixMul_cpu(matrix A, matrix B){
-  //計算結果行列の用意
-  matrix C;
-  C.height = A.height;
-  C.width = B.width;
-  C.elements = new float[C.height*C.width];
+__global__ void matrixAddBias(matrix M, matrix bias){
+  //行列Cにおけるどこを計算するスレッドか確定する。
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  int col = blockIdx.x*blockDim.x + threadIdx.x;
 
-  for(int i = 0; i < C.height; i++){
-    for(int j = 0; j < C.width; j++){
-      float x = 0.0f;
-      for (int k = 0; k < A.width; k++) {
-        x += A.elements[i*A.width+k]*B.elements[k*B.width+j];
-      }
-
-      C.elements[i*C.width+j] = x;
-    }
+  //計算が必要なスレッドか確認
+  if(row < M.height && col < M.width){
+    M.elements[row*M.width+col] += bias.elements[col];
   }
-
-  return C;
 }
 
-void randomInit(float* data, int size, float maxVal){
-  for(int i = 0; i < size; i++){
-    data[i] = maxVal*(rand()/(float)RAND_MAX);
+__global__ void matrixRelu(matrix M){
+  //行列Cにおけるどこを計算するスレッドか確定する。
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  int col = blockIdx.x*blockDim.x + threadIdx.x;
+
+  //計算が必要なスレッドか確認
+  if(row < M.height && col < M.width){
+    M.elements[row*M.width+col] = (M.elements[row*M.width+col] < 0)? 0: M.elements[row*M.width+col];
   }
 }
 
