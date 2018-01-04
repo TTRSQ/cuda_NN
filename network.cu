@@ -57,27 +57,20 @@ public:
     }
 
     void add_bias(matrix &in){
-        for (int i = 0; i < in.h; i++) {
-            for (int j = 0; j < in.w; j++) {
-                in.t[i][j] += bias.t[0][j];
-            }
-        }
+        matrixAddBias(in, bias);
     }
 
     void relu(matrix &in){
-        for (int i = 0; i < in.h; i++) {
-            for (int j = 0; j < in.w; j++) {
-                in.t[i][j] = (in.t[i][j] > 0)? in.t[i][j]: 0;
-            }
-        }
+        matrixRelu(in);
     }
 
     void forward(matrix &in){
-        x_transpose = in.transpose();
-        in.dot(w_list);
-        add_bias(in);
-        relu_prime = in;
-        relu(in);
+        matrixCpy(x_transpose, in);
+        matrixTranspose(x_transpose);
+        matrixMul(in, w_list);
+        matrixAddBias(in, bias);
+        matrixCpy(relu_prime, in);
+        matrixRelu(in);
     }
 
     void backward(matrix &in){
@@ -150,12 +143,13 @@ public:
     }
 
     void softmax_forward(matrix &in){
-        x_transpose = in.transpose();
-        in.dot(w_list);
-        add_bias(in);
+        matrixCpy(x_transpose, in);
+        matrixTranspose(x_transpose);
+        matrixMul(in, w_list);
+        matrixAddBias(in, bias);
         //- relu
         softmax(in);
-        softmax_output = in;
+        matrixCpy(softmax_output, in);
     }
 
     void softmax_backward(matrix &in){

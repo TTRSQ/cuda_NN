@@ -44,6 +44,29 @@ void printMatrix(matrix M){
   std::cout << std::endl;
 }
 
+__global__ void matrixCpy_cuda(matrix M, matrix org){
+  //行列Cにおけるどこを計算するスレッドか確定する。
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  int col = blockIdx.x*blockDim.x + threadIdx.x;
+
+  //計算が必要なスレッドか確認
+  if(row < M.height && col < M.width){
+    M.elements[row*M.width+col] = org.elements[row*org.width+col];
+  }
+}
+
+static void matrixCpy(matrix& d_m_in, matrix& d_m_ac){
+  //入力のサイズをコピー元と合わせる。
+  cudaFree(d_m_in.elements);
+  d_m_in.height = d_m_ac.height; d_m_in.width = d_m_ac.width;
+  cudaMalloc((void**)&d_m_in.elements, d_m_in.height*d_m_in.width*sizeof(float));
+  //入力のサイズに合わせてブロックとグリッドの設定
+  dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
+
+  matrixCpy_cuda<<<gld, blk>>>(d_m_in, d_m_ac);
+}
+
 __global__ void matrixAdd_cuda(matrix M, matrix add){
   //行列Cにおけるどこを計算するスレッドか確定する。
   int row = blockIdx.y*blockDim.y + threadIdx.y;
@@ -56,8 +79,7 @@ __global__ void matrixAdd_cuda(matrix M, matrix add){
 }
 
 static void matrixAdd(matrix& d_m_in, matrix& d_m_ac){
-
-  //Cのサイズに合わせてブロックとグリッドの設定
+  //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
 
@@ -65,7 +87,7 @@ static void matrixAdd(matrix& d_m_in, matrix& d_m_ac){
 }
 
 __global__ void matrixMinus_cuda(matrix M, matrix minus){
-  //行列Cにおけるどこを計算するスレッドか確定する。
+  //行列Mにおけるどこを計算するスレッドか確定する。
   int row = blockIdx.y*blockDim.y + threadIdx.y;
   int col = blockIdx.x*blockDim.x + threadIdx.x;
 
@@ -76,8 +98,7 @@ __global__ void matrixMinus_cuda(matrix M, matrix minus){
 }
 
 static void matrixMinus(matrix& d_m_in, matrix& d_m_ac){
-
-  //Cのサイズに合わせてブロックとグリッドの設定
+  //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
 
@@ -124,7 +145,7 @@ static void matrixMul(matrix& d_m_in, matrix& d_m_ac){
 }
 
 __global__ void matrixAddBias_cuda(matrix M, matrix bias){
-  //行列Cにおけるどこを計算するスレッドか確定する。
+  //行列Mにおけるどこを計算するスレッドか確定する。
   int row = blockIdx.y*blockDim.y + threadIdx.y;
   int col = blockIdx.x*blockDim.x + threadIdx.x;
 
@@ -143,7 +164,7 @@ static void matrixAddBias(matrix& d_m_in, matrix& d_m_ac){
 }
 
 __global__ void matrixRelu_cuda(matrix M){
-  //行列Cにおけるどこを計算するスレッドか確定する。
+  //行列Mにおけるどこを計算するスレッドか確定する。
   int row = blockIdx.y*blockDim.y + threadIdx.y;
   int col = blockIdx.x*blockDim.x + threadIdx.x;
 
@@ -153,12 +174,43 @@ __global__ void matrixRelu_cuda(matrix M){
   }
 }
 
-static void matrixRelu(matrix& d_m_in, matrix& d_m_ac){
+static void matrixRelu(matrix& d_m_in){
   //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
 
   matrixRelu_cuda<<<gld, blk>>>(d_m_in);
+}
+
+__global__ void matrixTranspose_cuda(matrix M, matrix trans){
+  //行列Mにおけるどこを計算するスレッドか確定する。
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  int col = blockIdx.x*blockDim.x + threadIdx.x;
+
+  //計算が必要なスレッドか確認
+  if(row < trans.height && col < trans.width){
+    trans.elements[row*trans.width+col] = M.elements[col*M.width+row];
+  }
+}
+
+static void matrixTranspose(matrix& d_m_in){
+  //デバイスに演算結果の領域を確保
+  matrix d_ans;
+  d_ans.height = d_m_in.width; d_ans.width = d_m_in.height;
+  int size = d_ans.width*d_ans.height*sizeof(float);
+  cudaMalloc((void**)&d_ans.elements, size);
+
+  //Cのサイズに合わせてブロックとグリッドの設定
+  dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 gld((d_ans.width-1+blk.x)/blk.x, (d_ans.height-1+blk.y)/blk.y);
+
+  matrixTranspose_cuda<<<gld, blk>>>(d_m_in, d_ans);
+
+  //不要になった入力のメモリの開放
+  cudaFree(d_m_in.elements);
+
+  //演算結果を引き継ぐ
+  d_m_in = d_ans;
 }
 
 void randomInit(matrix m, int maxVal){
@@ -196,12 +248,14 @@ void checkFunction(void (*func)(matrix&, matrix&), int ah, int aw, int bh, int b
 
   func(dA, dB);
 
+  //Aのサイズを変更されたdAのサイズに合わせる。
   delete [] A.elements;
   A.height = dA.height;
   A.width = dA.width;
   A.elements = new float[A.height*A.width];
   size = dA.width*dA.height*sizeof(float);
   cudaMemcpy(A.elements, dA.elements, size, cudaMemcpyDeviceToHost);
+
   std::cout << "matrix:ans(" << A.height << ", " << A.width << ") =" << std::endl;
   printMatrix(A);
 
@@ -213,7 +267,47 @@ void checkFunction(void (*func)(matrix&, matrix&), int ah, int aw, int bh, int b
   std::cout << std::endl;
 }
 
+void checkFunction2(void (*func)(matrix&), int ah, int aw){
+  //行列作成
+  matrix A;
+  A.height = ah; A.width = aw;
+  A.elements = new float[A.width*A.height];
+  randomInit(A, 10);
+
+  //演算前確認
+  std::cout << "matrix:in(" << A.height << ", " << A.width << ") =" << std::endl;
+  printMatrix(A);
+
+  matrix dA;
+  dA.width = A.width; dA.height = A.height;
+
+  int size = dA.width*dA.height*sizeof(float);
+  cudaMalloc((void**)&dA.elements, size);
+  cudaMemcpy(dA.elements, A.elements, size, cudaMemcpyHostToDevice);
+
+  func(dA);
+
+  //Aのサイズを変更されたdAのサイズに合わせる。
+  delete [] A.elements;
+  A.height = dA.height;
+  A.width = dA.width;
+  A.elements = new float[A.height*A.width];
+  size = dA.width*dA.height*sizeof(float);
+  cudaMemcpy(A.elements, dA.elements, size, cudaMemcpyDeviceToHost);
+
+  std::cout << "matrix:ans(" << A.height << ", " << A.width << ") =" << std::endl;
+  printMatrix(A);
+
+  // ホストメモリ解放
+  delete [] A.elements;
+
+  for(int i = 0; i < 25; i++) std::cout << "-";
+  std::cout << std::endl;
+}
+
 void checkAll(){
+  std::cout << "cpy" << std::endl;
+  checkFunction(matrixCpy, 3,3,2,2);
   std::cout << "add" << std::endl;
   checkFunction(matrixAdd, 2,2,2,2);
   std::cout << "minus" << std::endl;
@@ -223,7 +317,9 @@ void checkAll(){
   std::cout << "bias" << std::endl;
   checkFunction(matrixAddBias, 2,3,1,3);
   std::cout << "relu" << std::endl;
-  checkFunction(matrixRelu, 2,2,2,2);
+  checkFunction2(matrixRelu, 2,3);
+  std::cout << "trans" << std::endl;
+  checkFunction2(matrixTranspose, 2,3);
 }
 
 int main(){
