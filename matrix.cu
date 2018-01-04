@@ -71,14 +71,10 @@ __global__ void matrixMul(matrix A, matrix B, matrix C){
   }
 }
 
-void matrixMul_gpu(matrix m_in, matrix m_ac){
-  matrix ans;
-  ans.height = m_in.height;
-  ans.width = m_ac.width;
-  ans.elements = new float[ans.height*ans.width];
-  //デバイス要変数の用意
+static void matrixMul_gpu(matrix& d_m_in, matrix& d_m_ac){
+  //デバイスに演算結果の領域を確保
   matrix d_ans;
-  d_ans.width = ans.width; d_ans.height = ans.height;
+  d_ans.width = d_m_ac.width; d_ans.height = d_m_in.height;
 
   int size;
   //デバイスにメモリ確保
@@ -87,13 +83,23 @@ void matrixMul_gpu(matrix m_in, matrix m_ac){
 
   //Cのサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 gld((ans.width-1+blk.x)/blk.x, (ans.height-1+blk.y)/blk.y);
+  dim3 gld((d_ans.width-1+blk.x)/blk.x, (d_ans.height-1+blk.y)/blk.y);
 
-  matrixMul<<<gld, blk>>>(m_in, m_ac, d_ans);
+  matrixMul<<<gld, blk>>>(d_m_in, d_m_ac, d_ans);
+
+  matrix A;
+  A.height = 2;
+  A.width = 2;
+  A.elements = new float[A.height*A.width];
+  cudaMemcpy(A.elements, d_m_ac.elements, size, cudaMemcpyDeviceToHost);
+  std::cout << "matrix:actcpy =" << std::endl;
+  printMatrix(A);
 
   //不要になった入力のメモリの開放
-  cudaFree(m_in.elements);
-  
+  cudaFree(d_m_in.elements);
+
+  //演算結果を引き継ぐ
+  d_m_in = d_ans;
 }
 
 __global__ void matrixAddBias(matrix M, matrix bias){
@@ -118,42 +124,70 @@ __global__ void matrixRelu(matrix M){
   }
 }
 
-int mainmat(){
-  matrix A, B, C;
-  A.height = A.width = SIZE_RATE*BLOCK_SIZE;
-  B.height = B.width = SIZE_RATE*BLOCK_SIZE;
+void randomInit(matrix m, int maxVal){
+  for(int i = 0; i < m.height*m.width; i++) m.elements[i] = maxVal*(float(rand())/RAND_MAX) - maxVal/2.0;
+}
+
+__gloval__ void name(matrix a) {
+
+}
+
+void checkFunction(){
+  matrix A, B;
+  A.height = A.width = 2;
+  B.height = B.width = 2;
 
   A.elements = new float[A.width*A.height];
   B.elements = new float[B.width*B.height];
 
-  randomInit(A.elements, A.width*A.height, 10);
-  randomInit(B.elements, B.width*B.height, 10);
+  randomInit(A, 10);
+  randomInit(B, 10);
 
-  //計測開始
-  clock_t start = clock();
-  C = matrixMul_cpu(A, B);
-  //計測終了
-  clock_t end = clock();
-  double rate = (double)(end - start);
-  std::cout << "cpuMultime = " << rate / CLOCKS_PER_SEC << "sec.\n";
+  //演算前確認
+  std::cout << "matrix:A =" << std::endl;
+  printMatrix(A);
+  std::cout << "matrix:B =" << std::endl;
+  printMatrix(B);
 
-  delete [] C.elements;
+  matrix dA, dB;
+  dA.width = A.width; dA.height = A.height;
+  dB.width = B.width; dB.height = B.height;
 
-  //計測開始
-  start = clock();
-  C = matrixMul_gpu(A, B);
-  //計測終了
-  end = clock();
-  std::cout << "gpuMultime = " << (double)(end - start) / CLOCKS_PER_SEC << "sec.\n";
-  std::cout << "rate = " << rate/((double)(end - start)) << std::endl;
-  //printMatrix(A);
-  //printMatrix(B);
-  //printMatrix(C);
+  int a;
+  &a
 
-  // ホストメモリ解放
-  delete [] A.elements;
-  delete [] B.elements;
-  delete [] C.elements;
+  int *a;
+  *a = 1;
+  a = 1が入ってるアドレス
+  int b = 2;
+  a = &b;
+  &a//=2
 
+  int size = dA.width*dA.height*sizeof(float);
+  cudaMalloc((void**)&dA.elements, size);
+  cudaMemcpy(dA.elements, A.elements, size, cudaMemcpyHostToDevice);
+
+  cudaMemcpy(B.elements, dA.elements, size, cudaMemcpyDeviceToHost);
+
+  std::cout << "matrix:B =" << std::endl;
+  printMatrix(B);
+
+  // size = dB.width*dB.height*sizeof(float);
+  // cudaMalloc((void**)&dB.elements, size);
+  // cudaMemcpy(dB.elements, B.elements, size, cudaMemcpyHostToDevice);
+  //
+  // func(dA, dB);
+  //
+  // cudaMemcpy(A.elements, dA.elements, size, cudaMemcpyDeviceToHost);
+  // std::cout << "matrix:ans =" << std::endl;
+  // printMatrix(A);
+  //
+  // // ホストメモリ解放
+  // delete [] A.elements;
+  // delete [] B.elements;
+}
+
+int main(){
+  checkFunction();
   return 0;
 }
