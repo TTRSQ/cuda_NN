@@ -13,7 +13,7 @@ public:
 
   void cpy_to_device(){
     cudaFree(device.elements);
-    int size = (host.height)*(host.width)*sizeof(float);
+    int size = (host.height)*(host.width)*sizeof(double);
     cudaMalloc((void**)&device.elements, size);
     cudaMemcpy(device.elements, host.elements, size, cudaMemcpyHostToDevice);
   }
@@ -21,8 +21,8 @@ public:
   void cpy_to_host(){
     delete [] host.elements;
     int size = device.height * device.width;
-    host.elements = new float[size];
-    size *= sizeof(float);
+    host.elements = new double[size];
+    size *= sizeof(double);
     cudaMemcpy(host.elements, device.elements, size, cudaMemcpyDeviceToHost);
   }
 };
@@ -138,17 +138,9 @@ public:
         }
     }
 
-    double cross_entropy(matrix &in, matrix &teacher){
-      //ホストで受け取ってデバイス側に
-        std::vector<double> v;
-        v.resize(in.h);
-        std::fill(v.begin(), v.end(), 0.0);
-        for (int i = 0; i < in.h; i++) {
-            for (int j = 0; j < in.w; j++) {
-                v[i] += -teacher.t[i][j]*log(in.t[i][j]);
-            }
-        }
-        return v;
+    void cross_entropy(matrix& err, matrix &result, matrix &teacher){
+      //デバイス、新しく作ったデバイス側のポインタを返す。
+        matrixCrossE(err, result, teacher);
     }
 
     void softmax_forward(matrix &in){
@@ -349,32 +341,63 @@ public:
 
     std::vector<double> prediction(std::vector<double> in){
       //inをホストから受け取ってデバイスにコピー
-        std::vector<std::vector<double> > dvec;
-        dvec.push_back(in);
-        matrix matin(dvec);
-        for(int i = 0; i < affine.size(); i++){
-            affine[i].forward(matin);
-        }
-        matrixMul(matin, softmax.w_list);
-        return matin.t[0];
+      matrix d_in;
+      d_in.height = 1;
+      d_in.width = in.size();
+      cudaMalloc((void**)&d_in.elements, d_in.width*d_in.height*sizeof(double));
+      cudaMemcpy(d_in.elements, &in[0],  d_in.width*d_in.height*sizeof(double), cudaMemcpyHostToDevice);
+
+      //順伝搬
+      for(int i = 0; i < affine.size(); i++) affine[i].forward(d_in);
+      matrixMul(d_in, softmax.w_list.device);
+
+      std::vector<double> v;
+      v.resize(d_in.height*d_in.width);
+      cudaMemcpy(&v[0], d_in.elements,  d_in.width*d_in.height*sizeof(double), cudaMemcpyDeviceToHost);
+
+      cudaFree(d_in.elements);
+      return v;
     }
 
-    double calculate_error(matrix in, matrix teacher){
-      double *d_err = 0;
+    double calculate_error(std::vector<std::vector<double> > in, std::vector<std::vector<double> > teacher){
+      double err = 0;
 
-        for(int i = 0; i < affine.size(); i++){
-            affine[i].forward(in);
-        }
+      matrix d_in;
+      d_in.height = in.size();
+      d_in.width = in[0].size();
+      matrix d_teacher;
+      d_teacher.height = teacher.size();
+      d_teacher.width = teacher[0].size();
 
-        softmax.softmax_forward(in);
-        std::vector<double> v;
-        v = softmax.cross_entropy(in, teacher);
+      int size = d_in.height*d_in.width*sizeof(double);
 
-        double mean = 0;
-        for (int i = 0; i < v.size(); i++) {
-            mean += v[i]/v.size();
-        }
-        return mean;
+      cudaMalloc((void**)&d_in.elements, size);
+      cudaMalloc((void**)&d_teacher.elements, size);
+
+      int in_size = in.size();
+      for(int i = 1; i < in_size; i++){
+        std::copy(in[i].begin(),in[i].end(),std::back_inserter(in[0]));
+        std::copy(teacher[i].begin(),teacher[i].end(),std::back_inserter(teacher[0]));
+      }
+
+      cudaMemcpy(d_in.elements, &in[0], size, cudaMemcpyHostToDevice);
+      cudaMemcpy(d_teacher.elements, &teacher[0], size, cudaMemcpyHostToDevice);
+
+      for(int i = 0; i < affine.size(); i++){
+          affine[i].forward(d_in);
+      }
+      softmax.softmax_forward(d_in);
+
+      matrix m_err;
+      softmax.cross_entropy(m_err, d_in, d_teacher);
+
+      matrixSumColumn(m_err);
+      matrixSumRow(m_err);
+
+      cudaMemcpy(&err, m_err.elements, sizeof(double), cudaMemcpyDeviceToHost);
+      cudaFree(m_err.elements);
+
+      return err/in_size;
     }
 
     void for_and_backward(matrix in, matrix teacher){
