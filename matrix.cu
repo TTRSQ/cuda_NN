@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <cstdio>
 
@@ -103,6 +102,25 @@ static void matrixMinus(matrix& d_m_in, matrix& d_m_ac){
   dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
 
   matrixMinus_cuda<<<gld, blk>>>(d_m_in, d_m_ac);
+}
+
+__global__ void matrixConstMul_cuda(matrix M, int rate){
+  //行列Mにおけるどこを計算するスレッドか確定する。
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  int col = blockIdx.x*blockDim.x + threadIdx.x;
+
+  //計算が必要なスレッドか確認
+  if(row < M.height && col < M.width){
+    M.elements[row*M.width+col] *= rate;
+  }
+}
+
+static void matrixConstMul(matrix& d_m_in, int rate){
+  //入力のサイズに合わせてブロックとグリッドの設定
+  dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
+
+  matrixConstMul_cuda<<<gld, blk>>>(d_m_in, rate);
 }
 
 __global__ void matrixMul_cuda(matrix A, matrix B, matrix C){
@@ -213,6 +231,63 @@ static void matrixTranspose(matrix& d_m_in){
   d_m_in = d_ans;
 }
 
+__global__ void matrixWithFunc1_cuda(matrix m1, void (*func)(float&)){
+  //行列Mにおけるどこを計算するスレッドか確定する。
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  int col = blockIdx.x*blockDim.x + threadIdx.x;
+
+  //計算が必要なスレッドか確認
+  if(row < m1.height && col < m1.width){
+    func(&m1.elements[row*m1.width+col]);
+  }
+}
+
+static void matrixFunc1(matrix& d_m_1, void (*func)(float&)){
+  //入力のサイズに合わせてブロックとグリッドの設定
+  dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 gld((d_m_1.width-1+blk.x)/blk.x, (d_m_1.height-1+blk.y)/blk.y);
+
+  matrixFunc1_cuda<<<gld, blk>>>(d_m_1, func);
+}
+
+__global__ void matrixWithFunc2_cuda(matrix m1, matrix m2, void (*func)(float&, float&)){
+  //行列Mにおけるどこを計算するスレッドか確定する。
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  int col = blockIdx.x*blockDim.x + threadIdx.x;
+
+  //計算が必要なスレッドか確認
+  if(row < m1.height && col < m1.width){
+    func(&m1.elements[row*m1.width+col], &m2.elements[row*m2.width+col]);
+  }
+}
+
+static void matrixFunc2(matrix& d_m_1, matrix& d_m_2, void (*func)(float&, float&)){
+  //入力のサイズに合わせてブロックとグリッドの設定
+  dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 gld((d_m_1.width-1+blk.x)/blk.x, (d_m_1.height-1+blk.y)/blk.y);
+
+  matrixFunc2_cuda<<<gld, blk>>>(d_m_1, d_m_2, func);
+}
+
+__global__ void matrixWithFunc3_cuda(matrix m1, matrix m2, matrix m3, void (*func)(float&, float&, float&)){
+  //行列Mにおけるどこを計算するスレッドか確定する。
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  int col = blockIdx.x*blockDim.x + threadIdx.x;
+
+  //計算が必要なスレッドか確認
+  if(row < m1.height && col < m1.width){
+    func(&m1.elements[row*m1.width+col], &m2.elements[row*m2.width+col], &m3.elements[row*m3.width+col]);
+  }
+}
+
+static void matrixFunc3(matrix& d_m_1, matrix& d_m_2, matrix& d_m_3, void (*func)(float&, float&, float&)){
+  //入力のサイズに合わせてブロックとグリッドの設定
+  dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 gld((d_m_1.width-1+blk.x)/blk.x, (d_m_1.height-1+blk.y)/blk.y);
+
+  matrixFunc3_cuda<<<gld, blk>>>(d_m_1, d_m_2, d_m_3, func);
+}
+
 void randomInit(matrix m, int maxVal){
   for(int i = 0; i < m.height*m.width; i++) m.elements[i] = int(maxVal*(float(rand())/RAND_MAX)) - maxVal/2.0;
 }
@@ -305,6 +380,44 @@ void checkFunction2(void (*func)(matrix&), int ah, int aw){
   std::cout << std::endl;
 }
 
+void checkFunction3(void (*func)(matrix&, int), int ah, int aw, int rate){
+  //行列作成
+  matrix A;
+  A.height = ah; A.width = aw;
+  A.elements = new float[A.width*A.height];
+  randomInit(A, 10);
+
+  //演算前確認
+  std::cout << "matrix:in(" << A.height << ", " << A.width << ") =" << std::endl;
+  printMatrix(A);
+
+  matrix dA;
+  dA.width = A.width; dA.height = A.height;
+
+  int size = dA.width*dA.height*sizeof(float);
+  cudaMalloc((void**)&dA.elements, size);
+  cudaMemcpy(dA.elements, A.elements, size, cudaMemcpyHostToDevice);
+
+  func(dA, rate);
+
+  //Aのサイズを変更されたdAのサイズに合わせる。
+  delete [] A.elements;
+  A.height = dA.height;
+  A.width = dA.width;
+  A.elements = new float[A.height*A.width];
+  size = dA.width*dA.height*sizeof(float);
+  cudaMemcpy(A.elements, dA.elements, size, cudaMemcpyDeviceToHost);
+
+  std::cout << "matrix:ans(" << A.height << ", " << A.width << ") =" << std::endl;
+  printMatrix(A);
+
+  // ホストメモリ解放
+  delete [] A.elements;
+
+  for(int i = 0; i < 25; i++) std::cout << "-";
+  std::cout << std::endl;
+}
+
 void checkAll(){
   std::cout << "cpy" << std::endl;
   checkFunction(matrixCpy, 3,3,2,2);
@@ -320,6 +433,8 @@ void checkAll(){
   checkFunction2(matrixRelu, 2,3);
   std::cout << "trans" << std::endl;
   checkFunction2(matrixTranspose, 2,3);
+  std::cout << "const Mul " << 2 << std::endl;
+  checkFunction3(matrixConstMul, 2,2,2);//最後の引数は倍率ß
 }
 
 int main(){

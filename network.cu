@@ -1,4 +1,4 @@
-#include "matrix.cu"
+S#include "matrix.cu"
 #include "stringpp.hpp"
 #include <cstdio>
 #include <ctime>
@@ -29,6 +29,7 @@ public:
     }
 
     void init_with_he(int h, int w, std::default_random_engine engine, std::normal_distribution<> dist){
+      //ホストでの処理
         matrixSizeInit(w_list, h, w);
         matrixSizeInit(prime_w_list, h, w);
         matrixSizeInit(velocity_matrix, h, w);
@@ -47,6 +48,7 @@ public:
     }
 
     void init_size(){
+      //ホストでの処理
         sizeInitFromMatrix(prime_w_list, w_list);
         sizeInitFromMatrix(velocity_matrix, w_list);
         sizeInitFromMatrix(ada_grad, w_list);
@@ -56,15 +58,8 @@ public:
         sizeInitFromMatrix(bias_ada_grad, bias);
     }
 
-    void add_bias(matrix &in){
-        matrixAddBias(in, bias);
-    }
-
-    void relu(matrix &in){
-        matrixRelu(in);
-    }
-
     void forward(matrix &in){
+      //デバイスでの処理
         matrixCpy(x_transpose, in);
         matrixTranspose(x_transpose);
         matrixMul(in, w_list);
@@ -74,12 +69,17 @@ public:
     }
 
     void backward(matrix &in){
+      //デバイスでの処理
         //relu
-        for (int i = 0; i < in.h; i++) {
-            for (int j = 0; j < in.w; j++) {
-                in.t[i][j] = (relu_prime.t[i][j] > 0)? in.t[i][j]: 0;
-            }
-        }
+
+        // for (int i = 0; i < in.h; i++) {
+        //     for (int j = 0; j < in.w; j++) {
+        //         in.t[i][j] = (relu_prime.t[i][j] > 0)? in.t[i][j]: 0;
+        //     }
+        // }
+        matrixFunc2(in, relu_prime, [](float& f_in, float& f_relu_prime){
+          f_in = (f_relu_prime > 0)? f_in: 0;
+        });
 
         //bias
         bias_prime = in.sum_column();
@@ -89,12 +89,15 @@ public:
         }
 
         //affine
-        x_transpose.dot(in);
-        prime_w_list = x_transpose;
+        matrixMul(x_transpose, in);
+        matrixCpy(prime_w_list, x_transpose);
 
         matrix wtrans;
-        wtrans = w_list.transpose();
-        in.dot(wtrans);
+        matrixCpy(wtrans, w_list);
+        matrixTranspose(wtrans);
+        matrixMul(in, wtrans);
+        cudaFree(wtrans.elements);
+
         for (int i = 0; i < prime_w_list.h; i++) {
             for (int j = 0; j < prime_w_list.w; j++) {
                 velocity_matrix.t[i][j] = 0.9*velocity_matrix.t[i][j] + 0.1*prime_w_list.t[i][j];
@@ -153,7 +156,9 @@ public:
     }
 
     void softmax_backward(matrix &in){
-        in.is_minus_to(softmax_output);
+        matrixFunc2(in, softmax_output, [](float& f_in, float& f_so){
+          f_in = f_so - f_in;
+        });
         //bias
         bias_prime = in.sum_column();
         for (int i = 0; i < bias_prime.w; i++) {
@@ -161,12 +166,14 @@ public:
             bias_ada_grad.t[0][i] = 0.999*bias_ada_grad.t[0][i] + 0.001*bias_prime.t[0][i]*bias_prime.t[0][i];
         }
         //affine
-        x_transpose.dot(in);
-        prime_w_list = x_transpose;
+        matrixMul(x_transpose, in);
+        matrixCpy(prime_w_list, x_transpose);
 
         matrix wtrans;
-        wtrans = w_list.transpose();
-        in.dot(wtrans);
+        matrixCpy(wtrans, w_list);
+        matrixTranspose(wtrans);
+        matrixMul(in, wtrans);
+        cudaFree(wtrans.elements);
 
         for (int i = 0; i < prime_w_list.h; i++) {
             for (int j = 0; j < prime_w_list.w; j++) {
@@ -212,8 +219,8 @@ public:
         std::ofstream outputfile(name);
 
         outputfile << 7 << std::endl;
-        time_t t = time(NULL);
-        outputfile << ctime(&t);
+        time_t ti = time(NULL);
+        outputfile << ctime(&ti);
         outputfile << "input " << input << std::endl;
         outputfile << "hide " << hide << std::endl;
         outputfile << "hide_neuron " << hide_neuron << std::endl;
@@ -222,37 +229,37 @@ public:
 
         outputfile << "affine " << affine.size() << std::endl;
         for (int i = 0; i < affine.size(); i++) {
-            outputfile << affine[i].w_list.h << ' ' << affine[i].w_list.w << std::endl;
-            for (int j = 0; j < affine[i].w_list.h; j++) {
-                for (int k = 0; k < affine[i].w_list.w; k++) {
+            outputfile << affine[i].w_list.height << ' ' << affine[i].w_list.width << std::endl;
+            for (int j = 0; j < affine[i].w_list.height; j++) {
+                for (int k = 0; k < affine[i].w_list.width; k++) {
                     if (k != 0) outputfile << ' ';
-                    outputfile << affine[i].w_list.t[j][k];
+                    outputfile << affine[i].w_list.elements[j*affine[i].w_list.width+k];
                 }
                 outputfile << std::endl;
-                if (j == affine[i].w_list.h - 1) {
-                    outputfile << "bias " << affine[i].bias.w << std::endl;
-                    for (int bia = 0; bia < affine[i].bias.w; bia++) {
+                if (j == affine[i].w_list.height - 1) {
+                    outputfile << "bias " << affine[i].bias.width << std::endl;
+                    for (int bia = 0; bia < affine[i].bias.width; bia++) {
                         if(bia != 0) outputfile << ' ';
-                        outputfile << affine[i].bias.t[0][bia];
+                        outputfile << affine[i].bias.elements[bia];
                     }
                     outputfile << std::endl;
                 }
             }
         }
         outputfile << "softmax" << std::endl;
-        outputfile << softmax.w_list.h << ' ' << softmax.w_list.w << std::endl;
-        for (int i = 0; i < softmax.w_list.h; i++) {
-            for (int j = 0; j < softmax.w_list.w; j++) {
+        outputfile << softmax.w_list.height << ' ' << softmax.w_list.width << std::endl;
+        for (int i = 0; i < softmax.w_list.height; i++) {
+            for (int j = 0; j < softmax.w_list.width; j++) {
                 if(j != 0) outputfile << ' ';
-                outputfile << softmax.w_list.t[i][j];
+                outputfile << softmax.w_list.elements[i*softmax.w_list.width+j];
             }
             outputfile << std::endl;
         }
 
-        outputfile << "bias " << softmax.bias.w << std::endl;
-        for (int bia = 0; bia < softmax.bias.w; bia++) {
+        outputfile << "bias " << softmax.bias.width << std::endl;
+        for (int bia = 0; bia < softmax.bias.width; bia++) {
             if(bia != 0) outputfile << ' ';
-            outputfile << softmax.bias.t[0][bia];
+            outputfile << softmax.bias.elements[bia];
         }
 
         outputfile.close();
@@ -345,7 +352,7 @@ public:
         for(int i = 0; i < affine.size(); i++){
             affine[i].forward(matin);
         }
-        matin.dot(softmax.w_list);
+        matrixMul(matin, softmax.w_list);
         return matin.t[0];
     }
 
@@ -366,6 +373,7 @@ public:
     }
 
     void for_and_backward(matrix in, matrix teacher){
+      //デバイスでの処理
         for(int i = 0; i < affine.size(); i++){
             affine[i].forward(in);
         }
@@ -379,22 +387,31 @@ public:
     }
 
     static void adam(double leaning_rate, matrix &ada_grad, matrix &velocity_matrix, matrix &prime_w_list, matrix &w_list){
-        for (int i = 0; i < prime_w_list.h; i++) {
-            for (int j = 0; j < prime_w_list.w; j++) {
-                w_list.t[i][j] -= (leaning_rate*10*velocity_matrix.t[i][j])/(sqrt(1000*ada_grad.t[i][j])+0.00000001);
-            }
-        }
+      //デバイスでの処理
+        // for (int i = 0; i < prime_w_list.h; i++) {
+        //     for (int j = 0; j < prime_w_list.w; j++) {
+        //         w_list.t[i][j] -= (leaning_rate*10*velocity_matrix.t[i][j])/(sqrt(1000*ada_grad.t[i][j])+0.00000001);
+        //     }
+        // }
+        matrixFunc3(w_list, velocity_matrix, ada_grad, [&leaning_rate](float& f_w, float& f_vm, float& f_ag){
+          f_w -= (leaning_rate*10*f_vm)/(sqrt(1000*f_ag)+0.00000001);
+        });
     }
 
     static void sgd(double leaning_rate, matrix &ada_grad, matrix &velocity_matrix, matrix &prime_w_list, matrix &w_list){
-        for (int i = 0; i < prime_w_list.h; i++) {
-            for (int j = 0; j < prime_w_list.w; j++) {
-                w_list.t[i][j] +=  - prime_w_list.t[i][j];
-            }
-        }
+      //デバイスでの処理
+        // for (int i = 0; i < prime_w_list.h; i++) {
+        //     for (int j = 0; j < prime_w_list.w; j++) {
+        //         w_list.t[i][j] -= leaning_rate*prime_w_list.t[i][j];
+        //     }
+        // }
+        matrixFunc2(w_list, prime_w_list, [&leaning_rate](float& f_w, float f_wp){
+          f_w -= leaning_rate*f_wp;
+        });
     }
 
     void leaning(double leaning_rate, void (*func)(double, matrix&, matrix&, matrix&, matrix&)){
+      //デバイスでの処理
         for (int i = 0; i < affine.size(); i++) {
             func(leaning_rate, affine[i].ada_grad, affine[i].velocity_matrix, affine[i].prime_w_list, affine[i].w_list);
             func(leaning_rate, affine[i].bias_ada_grad, affine[i].bias_velocity_matrix, affine[i].bias_prime, affine[i].bias);
