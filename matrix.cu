@@ -104,7 +104,7 @@ static void matrixMinus(matrix& d_m_in, matrix& d_m_ac){
   matrixMinus_cuda<<<gld, blk>>>(d_m_in, d_m_ac);
 }
 
-__global__ void matrixConstMul_cuda(matrix M, int rate){
+__global__ void matrixConstMul_cuda(matrix M, float rate){
   //行列Mにおけるどこを計算するスレッドか確定する。
   int row = blockIdx.y*blockDim.y + threadIdx.y;
   int col = blockIdx.x*blockDim.x + threadIdx.x;
@@ -115,7 +115,7 @@ __global__ void matrixConstMul_cuda(matrix M, int rate){
   }
 }
 
-static void matrixConstMul(matrix& d_m_in, int rate){
+static void matrixConstMul(matrix& d_m_in, float rate){
   //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
@@ -200,6 +200,25 @@ static void matrixRelu(matrix& d_m_in){
   matrixRelu_cuda<<<gld, blk>>>(d_m_in);
 }
 
+__global__ void matrixReluWithOther_cuda(matrix M, matrix relufrom){
+  //行列Mにおけるどこを計算するスレッドか確定する。
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  int col = blockIdx.x*blockDim.x + threadIdx.x;
+
+  //計算が必要なスレッドか確認
+  if(row < M.height && col < M.width){
+    M.elements[row*M.width+col] = (relufrom.elements[row*relufrom.width+col] < 0)? 0: M.elements[row*M.width+col];
+  }
+}
+
+static void matrixReluWithOther(matrix& d_m_in, matrix& d_m_ac){
+  //入力のサイズに合わせてブロックとグリッドの設定
+  dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
+
+  matrixReluWithOther_cuda<<<gld, blk>>>(d_m_in, d_m_ac);
+}
+
 __global__ void matrixTranspose_cuda(matrix M, matrix trans){
   //行列Mにおけるどこを計算するスレッドか確定する。
   int row = blockIdx.y*blockDim.y + threadIdx.y;
@@ -231,61 +250,62 @@ static void matrixTranspose(matrix& d_m_in){
   d_m_in = d_ans;
 }
 
-__global__ void matrixWithFunc1_cuda(matrix m1, void (*func)(float&)){
+__global__ void matrixSumColumn_cuda(matrix M, matrix ans){
   //行列Mにおけるどこを計算するスレッドか確定する。
-  int row = blockIdx.y*blockDim.y + threadIdx.y;
   int col = blockIdx.x*blockDim.x + threadIdx.x;
 
   //計算が必要なスレッドか確認
-  if(row < m1.height && col < m1.width){
-    func(&m1.elements[row*m1.width+col]);
+  if(col < ans.width){
+    float x = 0;
+    for(int i = 0; i < M.height; i++){
+      x += M.elements[i*M.width+col];
+    }
+    ans.elements[col] = x;
   }
 }
 
-static void matrixFunc1(matrix& d_m_1, void (*func)(float&)){
-  //入力のサイズに合わせてブロックとグリッドの設定
-  dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 gld((d_m_1.width-1+blk.x)/blk.x, (d_m_1.height-1+blk.y)/blk.y);
+static void matrixSumColumn(matrix& d_m_in){
+  //デバイスに演算結果の領域を確保
+  matrix d_ans;
+  d_ans.height = 1; d_ans.width = d_m_in.width;
+  int size = d_ans.width*d_ans.height*sizeof(float);
+  cudaMalloc((void**)&d_ans.elements, size);
 
-  matrixFunc1_cuda<<<gld, blk>>>(d_m_1, func);
+  //Cのサイズに合わせてブロックとグリッドの設定
+  dim3 blk(BLOCK_SIZE, 1);
+  dim3 gld((d_ans.width-1+blk.x)/blk.x, 1);
+
+  matrixSumColumn_cuda<<<gld, blk>>>(d_m_in, d_ans);
+
+  //不要になった入力のメモリの開放
+  cudaFree(d_m_in.elements);
+
+  //演算結果を引き継ぐ
+  d_m_in = d_ans;
 }
 
-__global__ void matrixWithFunc2_cuda(matrix m1, matrix m2, void (*func)(float&, float&)){
-  //行列Mにおけるどこを計算するスレッドか確定する。
+__global__ void matrixAdam_cuda(double leaning_rate, matrix ada_grad, matrix velocity_matrix, matrix prime_w_list, matrix w_list){
+  //cudaの処理
+  //どこを計算するスレッドか確定する。
   int row = blockIdx.y*blockDim.y + threadIdx.y;
   int col = blockIdx.x*blockDim.x + threadIdx.x;
 
+  int idx = row*w_list.width + col;
+
   //計算が必要なスレッドか確認
-  if(row < m1.height && col < m1.width){
-    func(&m1.elements[row*m1.width+col], &m2.elements[row*m2.width+col]);
+  if(row < w_list.height && col < w_list.width){
+    velocity_matrix.elements[idx] = 0.9*velocity_matrix.elements[idx] + 0.1*prime_w_list.elements[idx];
+    ada_grad.elements[idx] = 0.999*ada_grad.elements[idx] + 0.001*prime_w_list.elements[idx]*prime_w_list.elements[idx];
+    w_list.elements[idx] -= (leaning_rate*10*velocity_matrix.elements[idx])/(sqrt(1000*ada_grad.elements[idx])+0.00000001);
   }
 }
 
-static void matrixFunc2(matrix& d_m_1, matrix& d_m_2, void (*func)(float&, float&)){
-  //入力のサイズに合わせてブロックとグリッドの設定
+static void matrixAdam(double leaning_rate, matrix& ada_grad, matrix& velocity_matrix, matrix& prime_w_list, matrix& w_list){
+  //デバイスでの処理
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 gld((d_m_1.width-1+blk.x)/blk.x, (d_m_1.height-1+blk.y)/blk.y);
+  dim3 gld((w_list.width-1+blk.x)/blk.x, (w_list.height-1+blk.y)/blk.y);
 
-  matrixFunc2_cuda<<<gld, blk>>>(d_m_1, d_m_2, func);
-}
-
-__global__ void matrixWithFunc3_cuda(matrix m1, matrix m2, matrix m3, void (*func)(float&, float&, float&)){
-  //行列Mにおけるどこを計算するスレッドか確定する。
-  int row = blockIdx.y*blockDim.y + threadIdx.y;
-  int col = blockIdx.x*blockDim.x + threadIdx.x;
-
-  //計算が必要なスレッドか確認
-  if(row < m1.height && col < m1.width){
-    func(&m1.elements[row*m1.width+col], &m2.elements[row*m2.width+col], &m3.elements[row*m3.width+col]);
-  }
-}
-
-static void matrixFunc3(matrix& d_m_1, matrix& d_m_2, matrix& d_m_3, void (*func)(float&, float&, float&)){
-  //入力のサイズに合わせてブロックとグリッドの設定
-  dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 gld((d_m_1.width-1+blk.x)/blk.x, (d_m_1.height-1+blk.y)/blk.y);
-
-  matrixFunc3_cuda<<<gld, blk>>>(d_m_1, d_m_2, d_m_3, func);
+  matrixAdam_cuda<<<gld, blk>>>(leaning_rate, ada_grad, velocity_matrix, prime_w_list, w_list);
 }
 
 void randomInit(matrix m, int maxVal){
@@ -380,7 +400,7 @@ void checkFunction2(void (*func)(matrix&), int ah, int aw){
   std::cout << std::endl;
 }
 
-void checkFunction3(void (*func)(matrix&, int), int ah, int aw, int rate){
+void checkFunction3(void (*func)(matrix&, float), int ah, int aw, float rate){
   //行列作成
   matrix A;
   A.height = ah; A.width = aw;
@@ -419,6 +439,7 @@ void checkFunction3(void (*func)(matrix&, int), int ah, int aw, int rate){
 }
 
 void checkAll(){
+  srand((unsigned int)time(0));
   std::cout << "cpy" << std::endl;
   checkFunction(matrixCpy, 3,3,2,2);
   std::cout << "add" << std::endl;
@@ -429,10 +450,14 @@ void checkAll(){
   checkFunction(matrixMul, 2,3,3,2);
   std::cout << "bias" << std::endl;
   checkFunction(matrixAddBias, 2,3,1,3);
+  std::cout << "reluwithother" << std::endl;
+  checkFunction(matrixReluWithOther, 2,3,2,3);
   std::cout << "relu" << std::endl;
   checkFunction2(matrixRelu, 2,3);
   std::cout << "trans" << std::endl;
   checkFunction2(matrixTranspose, 2,3);
+  std::cout << "sumcol" << std::endl;
+  checkFunction2(matrixSumColumn, 3,4);
   std::cout << "const Mul " << 2 << std::endl;
   checkFunction3(matrixConstMul, 2,2,2);//最後の引数は倍率ß
 }
