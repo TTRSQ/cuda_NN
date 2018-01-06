@@ -7,23 +7,78 @@
 #include <map>
 
 class matrix_set{
+  bool host_f;
+  bool device_f;
 public:
   matrix host;
   matrix device;
 
+  matrix_set(){
+    host_f = false;
+    device_f = false;
+  }
+
+  bool hostExist(){
+    return host_f;
+  }
+
+  bool deviceExist(){
+    return device_f;
+  }
+
+  void resizeHost(int h, int w){
+    host.height = w; host.width = w;
+    if(host_f){
+      delete [] host.elements;
+    }
+    host.elements = new double[h*w];
+    host_f = true;
+  }
+
+  void deleteHost(){
+    if(host_f){
+      delete [] host.elements;
+      host_f = false;
+    }
+  }
+
+  void resizeDevice(int h, int w){
+    device.height = h; device.width = w;
+    if(device_f){
+      cudaFree(device.elements);
+    }
+    cudaMalloc((void**)&device.elements, h*w*sizeof(double));
+    device_f = true;
+  }
+
+  void deleteDevice(){
+    if(device_f){
+      cudaFree(device.elements);
+      device_f = false;
+    }
+  }
+
+  void deleteBoth(){
+    deleteDevice();
+    deleteHost();
+  }
+
   void cpy_to_device(){
-    cudaFree(device.elements);
-    int size = (host.height)*(host.width)*sizeof(double);
-    cudaMalloc((void**)&device.elements, size);
-    cudaMemcpy(device.elements, host.elements, size, cudaMemcpyHostToDevice);
+    if(host_f){
+      resizeDevice(host.height, host.width);
+      cudaMemcpy(device.elements, host.elements, host.height*host.width*sizeof(double), cudaMemcpyHostToDevice);
+    }else{
+      std::cout << "不正なコピーが起きました。" << std::endl;
+    }
   }
 
   void cpy_to_host(){
-    delete [] host.elements;
-    int size = device.height * device.width;
-    host.elements = new double[size];
-    size *= sizeof(double);
-    cudaMemcpy(host.elements, device.elements, size, cudaMemcpyDeviceToHost);
+    if(device_f){
+      resizeHost(device.height, device.width);
+      cudaMemcpy(host.elements, device.elements, device.height*device.width*sizeof(double), cudaMemcpyDeviceToHost);
+    }else{
+      std::cout << "不正なコピーが起きました。" << std::endl;
+    }
   }
 };
 
@@ -50,34 +105,57 @@ public:
         std::cout << "bias(" << bias.host.height << ", " << bias.host.width << ")" << std::endl;
     }
 
+    void push_to_cuda(){
+      w_list.cpy_to_device();
+      prime_w_list.cpy_to_device();
+      velocity_matrix.cpy_to_device();
+      ada_grad.cpy_to_device();
+
+      bias.cpy_to_device();
+      bias_prime.cpy_to_device();
+      bias_velocity_matrix.cpy_to_device();
+      bias_ada_grad.cpy_to_device();
+    }
+
+    void pull_from_cuda(){
+      w_list.cpy_to_host();
+      bias.cpy_to_host();
+    }
+
     void init_with_he(int h, int w, std::default_random_engine engine, std::normal_distribution<> dist){
       //ホストでの処理
-        matrixSizeInit(w_list.host, h, w);
-        matrixSizeInit(prime_w_list.host, h, w);
-        matrixSizeInit(velocity_matrix.host, h, w);
-        matrixSizeInit(ada_grad.host, h, w);
+      w_list.resizeHost(h, w);
+      prime_w_list.resizeHost(h, w);
+      velocity_matrix.resizeHost(h, w);
+      ada_grad.resizeHost(h, w);
 
-        double s = sqrt(2.0/h);
+      double s = sqrt(2.0/h);
+      for (int i = 0; i < h*w; i++) {
+              w_list.host.elements[i] = s*dist(engine);
+      }
 
-        for (int i = 0; i < h*w; i++) {
-                w_list.host.elements[i] = s*dist(engine);
-        }
+      bias.resizeHost(1, w);
+      bias_prime.resizeHost(1, w);
+      bias_velocity_matrix.resizeHost(1, w);
+      bias_ada_grad.resizeHost(1, w);
 
-        matrixSizeInit(bias.host, 1, w);
-        matrixSizeInit(bias_prime.host, 1, w);
-        matrixSizeInit(bias_velocity_matrix.host, 1, w);
-        matrixSizeInit(bias_ada_grad.host, 1, w);
+      push_to_cuda();
     }
 
     void init_size(){
       //ホストでの処理
-        sizeInitFromMatrix(prime_w_list.host, w_list.host);
-        sizeInitFromMatrix(velocity_matrix.host, w_list.host);
-        sizeInitFromMatrix(ada_grad.host, w_list.host);
+      if(w_list.hostExist()){
+        int h = w_list.host.height; int w = w_list.host.width;
+        prime_w_list.resizeHost(h, w);
+        velocity_matrix.resizeHost(h, w);
+        ada_grad.resizeHost(h, w);
 
-        sizeInitFromMatrix(bias_prime.host, bias.host);
-        sizeInitFromMatrix(bias_velocity_matrix.host, bias.host);
-        sizeInitFromMatrix(bias_ada_grad.host, bias.host);
+        bias.resizeHost(1, w);
+        bias_prime.resizeHost(1, w);
+        bias_velocity_matrix.resizeHost(1, w);
+        bias_ada_grad.resizeHost(1, w);
+      }
+      push_to_cuda();
     }
 
     void forward(matrix &in){
@@ -113,29 +191,13 @@ public:
 
 class softmax_cee : public affine_relu{
 public:
-    matrix_set cross_entropy_list;
     matrix_set softmax_output;
 
     softmax_cee(){}
 
     void softmax(matrix &in){
       //デバイス
-        for (int i = 0; i < in.h; i++) {
-            double sum = 0;
-            double max = in.t[i][0];
-            double min = in.t[i][0];
-            for (int j = 0; j < in.w; j++) {
-                max = std::max(in.t[i][j], max);
-                min = std::min(in.t[i][j], min);
-            }
-            double mid = (max + min)/2;
-            for (int j = 0; j < in.w; j++) {
-                sum += exp(in.t[i][j] - mid);
-            }
-            for (int j = 0; j < in.w; j++) {
-                in.t[i][j] = exp(in.t[i][j] - mid)/sum;
-            }
-        }
+        matrixSoftmax(in);
     }
 
     void cross_entropy(matrix& err, matrix &result, matrix &teacher){
@@ -196,18 +258,20 @@ public:
         std::normal_distribution<> dist(0.0, 1.0);
 
         affine.resize(hide);
-
         affine[0].init_with_he(input, hide_neuron, engine, dist);
-
         for (int i = 1; i < hide; i++) {
             affine[i].init_with_he(hide_neuron, hide_neuron, engine, dist);
         }
-
         softmax.init_with_he(hide_neuron, output, engine, dist);
     }
 
     void save_network(std::string name){
       //ホスト
+        for(int i = 0; i < affine.size(); i++){
+          affine[i].pull_from_cuda();
+        }
+        softmax.pull_from_cuda();
+
         name = "NNpram/" + name + ".txt";
         std::ofstream outputfile(name);
 
@@ -290,7 +354,7 @@ public:
             buff = split(str, ' ');
             h = std::stoi(buff[0]);
             w = std::stoi(buff[1]);
-            matrixSizeInit(affine[i].w_list.host, h, w);
+            affine[i].w_list.resizeHost(h, w);
             for (int j = 0; j < h; j++) {
                 getline(inputfile, str);
                 buff = split(str, ' ');
@@ -302,7 +366,7 @@ public:
             getline(inputfile, str);
             buff = split(str, ' ');
             int biasnum = std::stoi(buff[1]);
-            matrixSizeInit(affine[i].bias.host , 1, biasnum);
+            affine[i].bias.resizeHost(1, biasnum);
             affine[i].init_size();
             getline(inputfile, str);
             buff = split(str, ' ');
@@ -318,7 +382,7 @@ public:
         buff = split(str, ' ');
         h = std::stoi(buff[0]);
         w = std::stoi(buff[1]);
-        matrixSizeInit(softmax.w_list.host, h, w);
+        softmax.w_list.resizeHost(h, w);
         for (int j = 0; j < h; j++) {
             getline(inputfile, str);
             buff = split(str, ' ');
@@ -326,17 +390,18 @@ public:
                 softmax.w_list.host.elements[j*softmax.w_list.host.width+k] = std::stod(buff[k]);
             }
         }
+
         //bias
         getline(inputfile, str);
         buff = split(str, ' ');
         int biasnum = std::stoi(buff[1]);
-        matrixSizeInit(softmax.bias.host, 1, biasnum);
-        softmax.init_size();
+        softmax.bias.resizeHost(1, biasnum);
         getline(inputfile, str);
         buff = split(str, ' ');
         for (int j = 0; j < biasnum; j++) {
             softmax.bias.host.elements[j] = std::stod(buff[j]);
         }
+        softmax.init_size();
     }
 
     std::vector<double> prediction(std::vector<double> in){
@@ -395,23 +460,48 @@ public:
       matrixSumRow(m_err);
 
       cudaMemcpy(&err, m_err.elements, sizeof(double), cudaMemcpyDeviceToHost);
+
       cudaFree(m_err.elements);
+      cudaFree(d_in.elements);
+      cudaFree(d_teacher.elements);
 
       return err/in_size;
     }
 
-    void for_and_backward(matrix in, matrix teacher){
-      //デバイスでの処理
-        for(int i = 0; i < affine.size(); i++){
-            affine[i].forward(in);
+    void for_and_backward(std::vector<std::vector<double> > in, std::vector<std::vector<double> > teacher){
+      //ホストから受け取ってデバイス処理。
+      matrix_set d_in, d_teacher;
+      int h = in.size(); int w = in[0].size();
+      d_in.resizeHost(h, w);
+      for(int i = 0; i < h; i++){
+        for(int j = 0; j < w; j++){
+          d_in.host.elements[w*i+j] = in[i][j];
         }
+      }
+      d_in.cpy_to_device();
 
-        softmax.softmax_forward(in);
-        softmax.softmax_backward(teacher);
-
-        for(int i = affine.size() - 1; i >= 0; i--){
-            affine[i].backward(teacher);
+      h = teacher.size(); w = teacher[0].size();
+      d_teacher.resizeHost(h, w);
+      for(int i = 0; i < h; i++){
+        for(int j = 0; j < w; j++){
+          d_teacher.host.elements[w*i+j] = teacher[i][j];
         }
+      }
+      d_teacher.cpy_to_device();
+
+      for(int i = 0; i < affine.size(); i++){
+          affine[i].forward(d_in.device);
+      }
+
+      softmax.softmax_forward(d_in.device);
+      softmax.softmax_backward(d_teacher.device);
+
+      for(int i = affine.size() - 1; i >= 0; i--){
+          affine[i].backward(d_teacher.device);
+      }
+
+      d_in.deleteBoth();
+      d_teacher.deleteBoth();
     }
 
     static void adam(double leaning_rate, matrix& ada_grad, matrix& velocity_matrix, matrix& prime_w_list, matrix& w_list){

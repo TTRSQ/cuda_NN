@@ -10,28 +10,6 @@ struct matrix{
   double *elements;
 };
 
-void matrixSizeInit(matrix M, int h, int w){
-  M.height = h;
-  M.width = w;
-
-  int size = h*w;
-
-  delete [] M.elements;
-  M.elements = new double[size];
-  for(int i = 0; i < size; i++) M.elements[i] = 0.0;
-}
-
-void sizeInitFromMatrix(matrix M, matrix from){
-  M.height = from.height;
-  M.width = from.width;
-
-  int size = from.height*from.width;
-
-  delete [] M.elements;
-  M.elements = new double[size];
-  for(int i = 0; i < size; i++) M.elements[i] = 0.0;
-}
-
 void printMatrix(matrix M){
   for(int i = 0; i < M.height; i++){
     for(int j = 0; j < M.width; j++){
@@ -198,6 +176,33 @@ static void matrixRelu(matrix& d_m_in){
   dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
 
   matrixRelu_cuda<<<gld, blk>>>(d_m_in);
+}
+
+__global__ void matrixSoftmax_cuda(matrix M){
+  for (int i = 0; i < M.height; i++) {
+      double sum = 0;
+      double max = M.elements[i*M.width];
+      double min = M.elements[i*M.width];
+      for (int j = 0; j < M.width; j++) {
+          max = (M.elements[i*M.width+j] > max)? M.elements[i*M.width+j]: max;
+          min = (M.elements[i*M.width+j] < min)? M.elements[i*M.width+j]: min;
+      }
+      double mid = (max + min)/2;
+      for (int j = 0; j < M.width; j++) {
+          sum += exp(M.elements[i*M.width+j] - mid);
+      }
+      for (int j = 0; j < M.width; j++) {
+          M.elements[i*M.width+j] = exp(M.elements[i*M.width+j] - mid)/sum;
+      }
+  }
+}
+
+static void matrixSoftmax(matrix& d_m_in){
+  //入力のサイズに合わせてブロックとグリッドの設定
+  dim3 blk(1, 1);
+  dim3 gld(1, 1);
+
+  matrixSoftmax_cuda<<<gld, blk>>>(d_m_in);
 }
 
 __global__ void matrixReluWithOther_cuda(matrix M, matrix relufrom){
@@ -515,6 +520,8 @@ void checkAll(){
   checkFunction(matrixReluWithOther, 2,3,2,3);
   std::cout << "relu" << std::endl;
   checkFunction2(matrixRelu, 2,3);
+  std::cout << "softmax" << std::endl;
+  checkFunction2(matrixSoftmax, 2,3);
   std::cout << "trans" << std::endl;
   checkFunction2(matrixTranspose, 2,3);
   std::cout << "sumcol" << std::endl;
@@ -525,7 +532,6 @@ void checkAll(){
   checkFunction3(matrixConstMul, 2,2,2);//最後の引数は倍率ß
 }
 
-int main(){
-  checkAll();
-  return 0;
-}
+// int main(){
+//   checkAll();
+// }
