@@ -27,7 +27,7 @@ public:
   }
 
   void resizeHost(int h, int w){
-    host.height = w; host.width = w;
+    host.height = h; host.width = w;
     if(host_f){
       delete [] host.elements;
     }
@@ -150,10 +150,11 @@ public:
         velocity_matrix.resizeHost(h, w);
         ada_grad.resizeHost(h, w);
 
-        bias.resizeHost(1, w);
         bias_prime.resizeHost(1, w);
         bias_velocity_matrix.resizeHost(1, w);
         bias_ada_grad.resizeHost(1, w);
+      }else{
+        std::cout << "イニシャライズできませんでした。" << std::endl;
       }
       push_to_cuda();
     }
@@ -171,6 +172,8 @@ public:
     void backward(matrix &in){
       //デバイスでの処理
         //relu
+        printShape(in, "in");
+        printShape(relu_prime.device, "rp");
         matrixReluWithOther(in, relu_prime.device);
 
         //bias
@@ -404,57 +407,56 @@ public:
         softmax.init_size();
     }
 
-    std::vector<double> prediction(std::vector<double> in){
+    std::vector<double> prediction(std::vector<double> &in){
       //inをホストから受け取ってデバイスにコピー
-      matrix d_in;
-      d_in.height = 1;
-      d_in.width = in.size();
-      cudaMalloc((void**)&d_in.elements, d_in.width*d_in.height*sizeof(double));
-      cudaMemcpy(d_in.elements, &in[0],  d_in.width*d_in.height*sizeof(double), cudaMemcpyHostToDevice);
+      matrix_set m_in;
+      int h = 1; int w = in.size();
+      m_in.resizeHost(h, w);
+      for(int i = 0; i < w; i++) m_in.host.elements[i] = in[i];
+      m_in.cpy_to_device();
 
       //順伝搬
-      for(int i = 0; i < affine.size(); i++) affine[i].forward(d_in);
-      matrixMul(d_in, softmax.w_list.device);
-
+      for(int i = 0; i < affine.size(); i++){
+        affine[i].forward(m_in.device);
+      }
+      matrixMul(m_in.device, softmax.w_list.device);
       std::vector<double> v;
-      v.resize(d_in.height*d_in.width);
-      cudaMemcpy(&v[0], d_in.elements,  d_in.width*d_in.height*sizeof(double), cudaMemcpyDeviceToHost);
+      m_in.cpy_to_host();
+      for(int i = 0; i < w; i++) v.push_back(m_in.host.elements[i]);
 
-      cudaFree(d_in.elements);
+      m_in.deleteBoth();
       return v;
     }
 
-    double calculate_error(std::vector<std::vector<double> > in, std::vector<std::vector<double> > teacher){
-      double err = 0;
+    double calculate_error(std::vector<std::vector<double> > &in, std::vector<std::vector<double> > &teacher){
+      double err;
 
-      matrix d_in;
-      d_in.height = in.size();
-      d_in.width = in[0].size();
-      matrix d_teacher;
-      d_teacher.height = teacher.size();
-      d_teacher.width = teacher[0].size();
-
-      int size = d_in.height*d_in.width*sizeof(double);
-
-      cudaMalloc((void**)&d_in.elements, size);
-      cudaMalloc((void**)&d_teacher.elements, size);
-
-      int in_size = in.size();
-      for(int i = 1; i < in_size; i++){
-        std::copy(in[i].begin(),in[i].end(),std::back_inserter(in[0]));
-        std::copy(teacher[i].begin(),teacher[i].end(),std::back_inserter(teacher[0]));
+      matrix_set m_in, m_teacher;
+      int h = in.size(); int w = in[0].size();
+      m_in.resizeHost(h, w);
+      for(int i = 0; i < h; i++){
+        for(int j = 0; j < w; j++){
+          m_in.host.elements[i*w+j] = in[i][j];
+        }
       }
+      m_in.cpy_to_device();
 
-      cudaMemcpy(d_in.elements, &in[0], size, cudaMemcpyHostToDevice);
-      cudaMemcpy(d_teacher.elements, &teacher[0], size, cudaMemcpyHostToDevice);
+      h = teacher.size(); w = teacher[0].size();
+      m_teacher.resizeHost(w, h);
+      for(int i = 0; i < h; i++){
+        for(int j = 0; j < w; j++){
+          m_teacher.host.elements[i*w+j] = teacher[i][j];
+        }
+      }
+      m_teacher.cpy_to_device();
 
       for(int i = 0; i < affine.size(); i++){
-          affine[i].forward(d_in);
+          affine[i].forward(m_in.device);
       }
-      softmax.softmax_forward(d_in);
+      softmax.softmax_forward(m_in.device);
 
       matrix m_err;
-      softmax.cross_entropy(m_err, d_in, d_teacher);
+      softmax.cross_entropy(m_err, m_in.device, m_teacher.device);
 
       matrixSumColumn(m_err);
       matrixSumRow(m_err);
@@ -462,13 +464,13 @@ public:
       cudaMemcpy(&err, m_err.elements, sizeof(double), cudaMemcpyDeviceToHost);
 
       cudaFree(m_err.elements);
-      cudaFree(d_in.elements);
-      cudaFree(d_teacher.elements);
+      m_in.deleteBoth();
+      m_teacher.deleteBoth();
 
-      return err/in_size;
+      return err/h;
     }
 
-    void for_and_backward(std::vector<std::vector<double> > in, std::vector<std::vector<double> > teacher){
+    void for_and_backward(std::vector<std::vector<double> > &in, std::vector<std::vector<double> > &teacher){
       //ホストから受け取ってデバイス処理。
       matrix_set d_in, d_teacher;
       int h = in.size(); int w = in[0].size();

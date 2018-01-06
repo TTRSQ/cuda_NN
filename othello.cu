@@ -334,17 +334,14 @@ public:
 
         //盤面の勝率計算をしてqueueに追加
         for (int i = 0; i < v.size(); i++) {
-            //cout << v[i].first << " " << v[i].second << " ";
             int tempban[8][8];
             cpytoarray(tempban);
             update_xy(v[i].first, v[i].second, pcol, tempban);
             std::vector<double> tempvec;
             cpytovector(tempvec, tempban, pcol);
             std::vector<double> ans = net.prediction(tempvec);
-            //cout << ans[0] << endl;
             anspq.push(std::make_pair(ans[0], v[i]));
         }
-
         return anspq;
     }
 

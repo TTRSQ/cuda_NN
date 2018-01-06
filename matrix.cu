@@ -10,6 +10,10 @@ struct matrix{
   double *elements;
 };
 
+void printShape(matrix &m, std::string name){
+  std::cout << name << ": " << m.height << ", " << m.width << std::endl;
+}
+
 void printMatrix(matrix M){
   for(int i = 0; i < M.height; i++){
     for(int j = 0; j < M.width; j++){
@@ -56,6 +60,10 @@ __global__ void matrixAdd_cuda(matrix M, matrix add){
 }
 
 static void matrixAdd(matrix& d_m_in, matrix& d_m_ac){
+  if(d_m_in.height != d_m_ac.height || d_m_in.width != d_m_ac.width){
+    std::cout << "add err." << '\n';
+    return;
+  }
   //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
@@ -75,6 +83,10 @@ __global__ void matrixMinus_cuda(matrix M, matrix minus){
 }
 
 static void matrixMinus(matrix& d_m_in, matrix& d_m_ac){
+  if(d_m_in.height != d_m_ac.height || d_m_in.width != d_m_ac.width){
+    std::cout << "minus err." << '\n';
+    return;
+  }
   //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
@@ -118,6 +130,10 @@ __global__ void matrixMul_cuda(matrix A, matrix B, matrix C){
 }
 
 static void matrixMul(matrix& d_m_in, matrix& d_m_ac){
+  if(d_m_in.width != d_m_ac.height){
+    std::cout << "mul err." << '\n';
+    return;
+  }
   //デバイスに演算結果の領域を確保
   matrix d_ans;
   d_ans.width = d_m_ac.width; d_ans.height = d_m_in.height;
@@ -152,6 +168,10 @@ __global__ void matrixAddBias_cuda(matrix M, matrix bias){
 }
 
 static void matrixAddBias(matrix& d_m_in, matrix& d_m_ac){
+  if(d_m_in.width != d_m_ac.width){
+    std::cout << "bias err." << '\n';
+    return;
+  }
   //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
@@ -217,6 +237,10 @@ __global__ void matrixReluWithOther_cuda(matrix M, matrix relufrom){
 }
 
 static void matrixReluWithOther(matrix& d_m_in, matrix& d_m_ac){
+  if(d_m_in.height != d_m_ac.height || d_m_in.width != d_m_ac.width){
+    std::cout << "relu with other err." << '\n';
+    return;
+  }
   //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
@@ -336,6 +360,10 @@ __global__ void matrixCrossE_cuda(matrix err, matrix result, matrix teacher){
 }
 
 static void matrixCrossE(matrix& err, matrix& result, matrix& teacher){
+  if(err.height != result.height || err.width != result.width || result.height != teacher.height || result.width != teacher.width){
+    std::cout << "relu with other err." << '\n';
+    return;
+  }
   //デバイスに演算結果の領域を確保
   err.width = result.width; err.height = result.height;
 
