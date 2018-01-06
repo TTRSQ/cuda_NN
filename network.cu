@@ -35,6 +35,16 @@ public:
     host_f = true;
   }
 
+  void resizeHostWith0(int h, int w){
+    host.height = h; host.width = w;
+    if(host_f){
+      delete [] host.elements;
+    }
+    host.elements = new double[h*w];
+    for(int i = 0; i < h*w; i++) host.elements[i] = 0;
+    host_f = true;
+  }
+
   void deleteHost(){
     if(host_f){
       delete [] host.elements;
@@ -122,6 +132,17 @@ public:
       bias.cpy_to_host();
     }
 
+    void purgeMem(){
+      w_list.deleteBoth();
+      prime_w_list.deleteBoth();
+      velocity_matrix.deleteBoth();
+      ada_grad.deleteBoth();
+      bias.deleteBoth();
+      bias_prime.deleteBoth();
+      bias_velocity_matrix.deleteBoth();
+      bias_ada_grad.deleteBoth();
+    }
+
     void init_with_he(int h, int w, std::default_random_engine engine, std::normal_distribution<> dist){
       //ホストでの処理
       w_list.resizeHost(h, w);
@@ -146,13 +167,13 @@ public:
       //ホストでの処理
       if(w_list.hostExist()){
         int h = w_list.host.height; int w = w_list.host.width;
-        prime_w_list.resizeHost(h, w);
-        velocity_matrix.resizeHost(h, w);
-        ada_grad.resizeHost(h, w);
+        prime_w_list.resizeHostWith0(h, w);
+        velocity_matrix.resizeHostWith0(h, w);
+        ada_grad.resizeHostWith0(h, w);
 
-        bias_prime.resizeHost(1, w);
-        bias_velocity_matrix.resizeHost(1, w);
-        bias_ada_grad.resizeHost(1, w);
+        bias_prime.resizeHostWith0(1, w);
+        bias_velocity_matrix.resizeHostWith0(1, w);
+        bias_ada_grad.resizeHostWith0(1, w);
       }else{
         std::cout << "イニシャライズできませんでした。" << std::endl;
       }
@@ -172,8 +193,6 @@ public:
     void backward(matrix &in){
       //デバイスでの処理
         //relu
-        printShape(in, "in");
-        printShape(relu_prime.device, "rp");
         matrixReluWithOther(in, relu_prime.device);
 
         //bias
@@ -197,6 +216,11 @@ public:
     matrix_set softmax_output;
 
     softmax_cee(){}
+
+    void purgeMemS(){
+      purgeMem();
+      softmax_output.deleteBoth();
+    }
 
     void softmax(matrix &in){
       //デバイス
@@ -268,6 +292,11 @@ public:
         softmax.init_with_he(hide_neuron, output, engine, dist);
     }
 
+    void purgeNet(){
+      for(int i = 0; i < affine.size(); i++) affine[i].purgeMem();
+      softmax.purgeMemS();
+    }
+
     void save_network(std::string name){
       //ホスト
         for(int i = 0; i < affine.size(); i++){
@@ -321,6 +350,8 @@ public:
             if(bia != 0) outputfile << ' ';
             outputfile << softmax.bias.host.elements[bia];
         }
+
+        purgeNet();
 
         outputfile.close();
     }
@@ -376,6 +407,7 @@ public:
             for (int j = 0; j < biasnum; j++) {
                 affine[i].bias.host.elements[j] = std::stod(buff[j]);
             }
+            affine[i].push_to_cuda();
         }
         getline(inputfile, str);
 
@@ -405,6 +437,7 @@ public:
             softmax.bias.host.elements[j] = std::stod(buff[j]);
         }
         softmax.init_size();
+        softmax.push_to_cuda();
     }
 
     std::vector<double> prediction(std::vector<double> &in){
@@ -442,7 +475,7 @@ public:
       m_in.cpy_to_device();
 
       h = teacher.size(); w = teacher[0].size();
-      m_teacher.resizeHost(w, h);
+      m_teacher.resizeHost(h, w);
       for(int i = 0; i < h; i++){
         for(int j = 0; j < w; j++){
           m_teacher.host.elements[i*w+j] = teacher[i][j];

@@ -355,13 +355,13 @@ __global__ void matrixCrossE_cuda(matrix err, matrix result, matrix teacher){
   int idx = row*err.width+col;
   //計算が必要なスレッドか確認
   if(row < err.height && col < err.width){
-    err.elements[idx] = teacher.elements[idx]*log(result.elements[idx]);
+    err.elements[idx] = -teacher.elements[idx]*log(result.elements[idx]);
   }
 }
 
 static void matrixCrossE(matrix& err, matrix& result, matrix& teacher){
-  if(err.height != result.height || err.width != result.width || result.height != teacher.height || result.width != teacher.width){
-    std::cout << "relu with other err." << '\n';
+  if(result.height != teacher.height || result.width != teacher.width){
+    std::cout << "cross ent err." << '\n';
     return;
   }
   //デバイスに演算結果の領域を確保
