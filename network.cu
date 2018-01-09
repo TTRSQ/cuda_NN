@@ -539,21 +539,21 @@ public:
       d_teacher.deleteBoth();
     }
 
-    static void adam(double leaning_rate, matrix& ada_grad, matrix& velocity_matrix, matrix& prime_w_list, matrix& w_list){
-      matrixAdam(leaning_rate, ada_grad, velocity_matrix, prime_w_list, w_list);
+    static void adam(double leaning_rate, int sequence, matrix& ada_grad, matrix& velocity_matrix, matrix& prime_w_list, matrix& w_list){
+      matrixAdam(leaning_rate, sequence, ada_grad, velocity_matrix, prime_w_list, w_list);
     }
 
-    void leaning(double leaning_rate, void (*func)(double, matrix&, matrix&, matrix&, matrix&)){
+    void leaning(double leaning_rate, int sequence, void (*func)(double, int, matrix&, matrix&, matrix&, matrix&)){
       //デバイスでの処理
         for (int i = 0; i < affine.size(); i++) {
-            func(leaning_rate, affine[i].ada_grad.device, affine[i].velocity_matrix.device, affine[i].prime_w_list.device, affine[i].w_list.device);
-            func(leaning_rate, affine[i].bias_ada_grad.device, affine[i].bias_velocity_matrix.device, affine[i].bias_prime.device, affine[i].bias.device);
+            func(leaning_rate, sequence, affine[i].ada_grad.device, affine[i].velocity_matrix.device, affine[i].prime_w_list.device, affine[i].w_list.device);
+            func(leaning_rate, sequence, affine[i].bias_ada_grad.device, affine[i].bias_velocity_matrix.device, affine[i].bias_prime.device, affine[i].bias.device);
         }
-        func(leaning_rate, softmax.ada_grad.device, softmax.velocity_matrix.device, softmax.prime_w_list.device, softmax.w_list.device);
-        func(leaning_rate, softmax.bias_ada_grad.device, softmax.bias_velocity_matrix.device, softmax.bias_prime.device, softmax.bias.device);
+        func(leaning_rate, sequence, softmax.ada_grad.device, softmax.velocity_matrix.device, softmax.prime_w_list.device, softmax.w_list.device);
+        func(leaning_rate, sequence, softmax.bias_ada_grad.device, softmax.bias_velocity_matrix.device, softmax.bias_prime.device, softmax.bias.device);
     }
 
-    void leaning_adam(double leaning_rate){
-        leaning(leaning_rate, adam);
+    void leaning_adam(double leaning_rate, int sequence){
+        leaning(leaning_rate, sequence, adam);
     }
 };

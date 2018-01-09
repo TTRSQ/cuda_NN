@@ -378,7 +378,7 @@ static void matrixCrossE(matrix& err, matrix& result, matrix& teacher){
 
 }
 
-__global__ void matrixAdam_cuda(double leaning_rate, matrix ada_grad, matrix velocity_matrix, matrix prime_w_list, matrix w_list){
+__global__ void matrixAdam_cuda(double leaning_rate, int sequence, matrix ada_grad, matrix velocity_matrix, matrix prime_w_list, matrix w_list){
   //cudaの処理
   //どこを計算するスレッドか確定する。
   int row = blockIdx.y*blockDim.y + threadIdx.y;
@@ -390,16 +390,18 @@ __global__ void matrixAdam_cuda(double leaning_rate, matrix ada_grad, matrix vel
   if(row < w_list.height && col < w_list.width){
     velocity_matrix.elements[idx] = 0.9*velocity_matrix.elements[idx] + 0.1*prime_w_list.elements[idx];
     ada_grad.elements[idx] = 0.999*ada_grad.elements[idx] + 0.001*prime_w_list.elements[idx]*prime_w_list.elements[idx];
-    w_list.elements[idx] -= (leaning_rate*10*velocity_matrix.elements[idx])/(sqrt(1000*ada_grad.elements[idx])+0.00000001);
+    double v_hat = velocity_matrix.elements[idx]/(1 - pow(0.9, sequence));
+    double a_hat = ada_grad.elements[idx]/(1 - pow(0.999, sequence));
+    w_list.elements[idx] -= (leaning_rate*v_hat)/(sqrt(a_hat)+0.00000001);
   }
 }
 
-static void matrixAdam(double leaning_rate, matrix& ada_grad, matrix& velocity_matrix, matrix& prime_w_list, matrix& w_list){
+static void matrixAdam(double leaning_rate, int sequence, matrix& ada_grad, matrix& velocity_matrix, matrix& prime_w_list, matrix& w_list){
   //デバイスでの処理
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gld((w_list.width-1+blk.x)/blk.x, (w_list.height-1+blk.y)/blk.y);
 
-  matrixAdam_cuda<<<gld, blk>>>(leaning_rate, ada_grad, velocity_matrix, prime_w_list, w_list);
+  matrixAdam_cuda<<<gld, blk>>>(leaning_rate, sequence, ada_grad, velocity_matrix, prime_w_list, w_list);
 }
 
 void randomInit(matrix m, int maxVal){
