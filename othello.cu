@@ -165,25 +165,8 @@ public:
     vector<double> myans;
 
     ban_hist(){
-        myban.resize(64);
-        myans.resize(64);
-    }
-
-    void bancpy(int col){
-        for (int i = 0; i < 8; i++) {
-            for (int j = 0; j < 8; j++) {
-                int index = i*8 + j;
-                if (check_xy(j, i, col)) {
-                    myban[index] = 3.0;
-                }else{
-                    if (ban[i][j] == yet) {
-                        myban[index] = 0.0;
-                    }else{
-                        myban[index] = double((col == wht)? ban[i][j]: ((ban[i][j] == wht)? blk: wht));
-                    }
-                }
-            }
-        }
+        myban.resize(128);
+        myans.resize(2);
     }
 
     void bancpy_separate(int pcol){
@@ -198,12 +181,6 @@ public:
         }
     }
 
-    void anscpy(pair<int, int> p){
-        int index = p.second*8 + p.first;
-        fill(myans.begin(), myans.end(), 0.0);
-        myans[index] = 1.0;
-    }
-
     void print(){
         for (int i = 0; i < myban.size(); i++) {
             if (i != 0) std::cout << ' ';
@@ -216,42 +193,21 @@ public:
         }
         std::cout << endl;
     }
-
-    void printmyset(){
-        for (int i = 0; i < myban.size(); i++) {
-            if (i%8 == 0) {
-                std::cout << endl;
-            }else{
-                std::cout << ' ';
-            }
-            std::cout << myban[i];
-        }
-        std::cout << endl;
-        for (int i = 0; i < myans.size(); i++) {
-            if (i%8 == 0) {
-                std::cout << endl;
-            }else{
-                std::cout << ' ';
-            }
-            std::cout << myans[i];
-        }
-        std::cout << std::endl;
-    }
 };
 
-class nn_reader{
+class nn_reader_sp{
 public:
     network net;
 
-    nn_reader(){}
+    nn_reader_sp(){}
 
-    void make_initial(){
-        network n(64, 3, 128, 64, 300);
-        net = n;
+    nn_reader_sp(string name){
+        net.load_network(name);
     }
 
-    nn_reader(string name){
-        net.load_network(name);
+    void make_initial(){
+        network n(128, 5, 128, 2, 300);
+        net = n;
     }
 
     void reload_network(string name){
@@ -260,72 +216,6 @@ public:
 
     void save_network(string name){
         net.save_network(name);
-    }
-
-    pair<int, int> nnAnsor(int pcol){
-        ban_hist b;
-        b.bancpy(pcol);
-
-        vector<double> v = net.prediction(b.myban);
-
-        vector<pair<int, int> > plist = get_putList(pcol);
-        vector<pair<pair<int ,int>, double > > pos;
-
-        double sum = 0.0;
-
-        for (int i = 0; i < plist.size(); i++) {
-            int x = plist[i].first;
-            int y = plist[i].second;
-            pos.push_back(make_pair(plist[i], v[x + 8*y]));
-
-            sum += exp(v[x + 8*y]);
-        }
-
-        for (int i = 0; i < pos.size(); i++) {
-            pos[i].second = exp(pos[i].second)/sum;
-        }
-
-        double rand01 = (rand()%10000000)/10000000.0;
-        sum = 0;
-        int index = 0;
-        for (int i = 0; i < pos.size()+5; i++) {
-            sum += pos[i%pos.size()].second;
-            if (sum > rand01) {
-                index = i%pos.size();
-                break;
-            }
-        }
-        return pos[index].first;
-    }
-
-    pair<int, int> nnAnsorMax(int pcol){
-        ban_hist b;
-        b.bancpy(pcol);
-
-        std::vector<double> v = net.prediction(b.myban);
-        std::vector<std::pair<int, int> > plist = get_putList(pcol);
-
-        std::priority_queue<pair<double, pair<int, int> > > pq;
-
-        for (int i = 0; i < plist.size(); i++) {
-            pq.push(std::make_pair(v[plist[i].first + plist[i].second*8], plist[i]));
-        }
-
-        return pq.top().second;
-    }
-};
-
-class nn_reader_sp: public nn_reader{
-public:
-    nn_reader_sp(){}
-
-    void make_initial(){
-        network n(128, 3, 128, 2, 300);
-        net = n;
-    }
-
-    nn_reader_sp(string name){
-        net.load_network(name);
     }
 
     std::priority_queue<std::pair<double, std::pair<int, int> > > get_value_list(int pcol){
@@ -579,6 +469,7 @@ void nn_vs_nn(int start_num, int end_num, string name){
         nn_name = name + std::to_string(sequence);
 
         //preで読み込んでnameで保存
+        cout << nn_prename << endl;
         nn_reader_sp nr(nn_prename);
         vector<ban_hist> win_and_d_hist;
         vector<ban_hist> lose_hist;
@@ -740,7 +631,8 @@ void nn_vs_nn(int start_num, int end_num, string name){
         clock_t end = clock();
         std::cout << "sequence " << sequence << " end in " << (double)(end - start) / CLOCKS_PER_SEC << "sec." << std::endl;
     }
-    g.save("glaph");
+    string glaphname = name + to_string(start_num) + "-" + to_string(end_num);
+    g.save(glaphname.c_str());
     g.close();
 }
 
@@ -767,7 +659,7 @@ void init(){
 int main(){
     init();
 
-    nn_vs_nn(1, 100, "rand82fromLinux_ada");
+    nn_vs_nn(1, 50, "test");
 
     return 0;
 }

@@ -155,7 +155,7 @@ public:
               w_list.host.elements[i] = s*dist(engine);
       }
 
-      bias.resizeHost(1, w);
+      bias.resizeHostWith0(1, w);
       bias_prime.resizeHost(1, w);
       bias_velocity_matrix.resizeHost(1, w);
       bias_ada_grad.resizeHost(1, w);
