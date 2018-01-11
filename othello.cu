@@ -600,7 +600,7 @@ void nn_vs_nn(int start_num, int end_num, string name){
 
         cout << "data = " << matban.size() << endl;
 
-        nr.lean_minibach(200, 200, matban, matans);
+        nr.net.lean_minibach(200, 200, matban, matans);
 
        int game_counter = 0;
        int col = wht;

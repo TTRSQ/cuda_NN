@@ -561,13 +561,13 @@ public:
     void random_select(std::vector<std::vector<double> > &toin, std::vector<std::vector<double> > &toans,
        std::vector<std::vector<double> > &fromin, std::vector<std::vector<double> > &fromans){
 
-      double P = sqrt(from.size());
+      double P = sqrt(fromin.size());
       double threshold = RAND_MAX/P;
 
-      for(int i = 0; i < from.size(); i++){
+      for(int i = 0; i < fromin.size(); i++){
         if(rand() < threshold){
           toin.push_back(fromin[i]);
-          fromin.push_back(fromans[i]);
+          toans.push_back(fromans[i]);
         }
       }
     }
@@ -576,26 +576,25 @@ public:
 
       matplotlib g;
       g.open();
-      g.screen(0, 0, epock, 1);
+      g.screen(0, 0, epock, 2);
 
       int n = int(sqrt(in.size()));
       double dx = 1.0/n;
-      double err_prime = 0;
 
       for(int epock_n = 0; epock_n < epock; epock_n++){
         double decimal = 0;
-        for(int i = 0, i < n; i++){
-          vector<vector<double> > miniban;
-          vector<vector<double> > minians;
+        for(int i = 0; i < n; i++){
+          std::vector<std::vector<double> > miniban;
+          std::vector<std::vector<double> > minians;
           random_select(miniban, minians, in, teacher);
-
-          for (int j = 0; j < itr; j++) {
-              for_and_backward(miniban, minians);
-              leaning_adam(0.001, j+1);
+          if(miniban.size() == 0) continue;
+          for(int j = 0; j < itr; j++){
+            for_and_backward(miniban, minians);
+            leaning_adam(0.001, j+1);
           }
-          double err = nr.net.calculate_error(in, teacher);
-          g.line(i+decimal-dx, err_prime, i+decimal, err);
-          err_prime = err;
+          double err = calculate_error(in, teacher);
+          std::cout << i << " " << err << std::endl;
+          g.point(epock_n+decimal, err);
           decimal += dx;
         }
       }
