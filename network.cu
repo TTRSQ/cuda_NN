@@ -578,24 +578,25 @@ public:
       g.open();
       g.screen(0, 0, epock, 1);
 
-      double dx = 1.0/itr;
+      int n = int(sqrt(in.size()));
+      double dx = 1.0/n;
       double err_prime = 0;
 
       for(int epock_n = 0; epock_n < epock; epock_n++){
-        vector<vector<double> > miniban;
-        vector<vector<double> > minians;
-
-        random_select(miniban, minians, in, teacher);
-
         double decimal = 0;
+        for(int i = 0, i < n; i++){
+          vector<vector<double> > miniban;
+          vector<vector<double> > minians;
+          random_select(miniban, minians, in, teacher);
 
-        for (int i = 0; i < itr; i++) {
-            for_and_backward(miniban, minians);
-            leaning_adam(0.001, i+1);
-            double err = nr.net.calculate_error(in, teacher);
-            g.line(i+decimal-dx, err_prime, i+decimal, err);
-            err_prime = err;
-            decimal += dx;
+          for (int j = 0; j < itr; j++) {
+              for_and_backward(miniban, minians);
+              leaning_adam(0.001, j+1);
+          }
+          double err = nr.net.calculate_error(in, teacher);
+          g.line(i+decimal-dx, err_prime, i+decimal, err);
+          err_prime = err;
+          decimal += dx;
         }
       }
       g.close();
