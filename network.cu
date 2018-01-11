@@ -1,5 +1,6 @@
 #include "matrix.cu"
 #include "stringpp.hpp"
+#include "matplotlib.hpp"
 #include <cstdio>
 #include <ctime>
 #include <random>
@@ -555,5 +556,48 @@ public:
 
     void leaning_adam(double leaning_rate, int sequence){
         leaning(leaning_rate, sequence, adam);
+    }
+
+    void random_select(std::vector<std::vector<double> > &toin, std::vector<std::vector<double> > &toans,
+       std::vector<std::vector<double> > &fromin, std::vector<std::vector<double> > &fromans){
+
+      double P = sqrt(from.size());
+      double threshold = RAND_MAX/P;
+
+      for(int i = 0; i < from.size(); i++){
+        if(rand() < threshold){
+          toin.push_back(fromin[i]);
+          fromin.push_back(fromans[i]);
+        }
+      }
+    }
+
+    void lean_minibach(int epock, int itr, std::vector<std::vector<double> > &in, std::vector<std::vector<double> > &teacher){
+
+      matplotlib g;
+      g.open();
+      g.screen(0, 0, epock, 1);
+
+      double dx = 1.0/itr;
+      double err_prime = 0;
+
+      for(int epock_n = 0; epock_n < epock; epock_n++){
+        vector<vector<double> > miniban;
+        vector<vector<double> > minians;
+
+        random_select(miniban, minians, in, teacher);
+
+        double decimal = 0;
+
+        for (int i = 0; i < itr; i++) {
+            for_and_backward(miniban, minians);
+            leaning_adam(0.001, i+1);
+            double err = nr.net.calculate_error(in, teacher);
+            g.line(i+decimal-dx, err_prime, i+decimal, err);
+            err_prime = err;
+            decimal += dx;
+        }
+      }
+      g.close();
     }
 };

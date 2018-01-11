@@ -429,15 +429,15 @@ bool rand_vs_nn(int randcolor, nn_reader_sp& nsp){
     return counter[randcolor] < counter[((randcolor == wht)? blk: wht)];
 }
 
-void modif_teach(std::vector<std::vector<double> > &teach, int is_win){
+void make_teach(std::vector<std::vector<double> > &teach, bool is_win){
   double dx = 0.5;
   for(int i = 0; i < teach.size(); i++){
       cout << teach[i][0] << " " << teach[i][1] << endl;
   }
   for(int i = 0; i < teach.size(); i++){
     dx -= 0.5/teach.size();
-    teach[i][0] += (is_win == 1)? -dx: dx;
-    teach[i][1] += (is_win == 1)? dx: -dx;
+    teach[i][0] = (is_win)? 1-dx: dx;
+    teach[i][1] = (is_win)? dx: 1-dx;
   }
 
   cout << endl;
@@ -600,21 +600,7 @@ void nn_vs_nn(int start_num, int end_num, string name){
 
         cout << "data = " << matban.size() << endl;
 
-        matplotlib g2;
-        g2.open();
-        g2.screen(0, 0, 200, 1);
-
-        double lean_prime = 0;
-
-        for (int i = 0; i < 200; i++) {
-            nr.net.for_and_backward(matban, matans);
-            nr.net.leaning_adam(0.001, i+1);
-            double err = nr.net.calculate_error(matban, matans);
-            g2.line(i-1,lean_prime,i,err);
-            lean_prime = err;
-        }
-
-        g2.close();
+        nr.lean_minibach(200, 200, matban, matans);
 
        int game_counter = 0;
        int col = wht;
@@ -631,7 +617,7 @@ void nn_vs_nn(int start_num, int end_num, string name){
         clock_t end = clock();
         std::cout << "sequence " << sequence << " end in " << (double)(end - start) / CLOCKS_PER_SEC << "sec." << std::endl;
     }
-    string glaphname = name + to_string(start_num) + "-" + to_string(end_num);
+    string glaphname = "glaph/" + name + to_string(start_num) + "-" + to_string(end_num);
     g.save(glaphname.c_str());
     g.close();
 }
@@ -642,19 +628,6 @@ void init(){
     color_string[wht] = "white";
     color_string[blk] = "black";
 }
-
-// double evale_nn(string name){
-//     clock_t start = clock();
-//     int col = blk;
-//     int counter = 0;
-//     for (int i = 0; i < 300; i++) {
-//         counter += rand_vs_nn(col, name);
-//         col = (col == blk)? wht: blk;
-//     }
-//     clock_t end = clock();
-//     std::cout << name << " takes " << (double)(end - start) / CLOCKS_PER_SEC << "sec." << std::endl;
-//     return counter/300.0;
-// }
 
 int main(){
     init();
