@@ -206,7 +206,7 @@ public:
     }
 
     void make_initial(){
-        network n(128, 5, 128, 2, 100);
+        network n(128, 5, 128, 2, 150, SOFTMAX_CEE);
         net = n;
     }
 
@@ -632,7 +632,7 @@ void init(){
 int main(){
     init();
 
-    nn_vs_nn(2, 50, "test");
+    nn_vs_nn(1, 50, "test");
 
     return 0;
 }

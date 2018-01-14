@@ -199,28 +199,32 @@ static void matrixRelu(matrix& d_m_in){
 }
 
 __global__ void matrixSoftmax_cuda(matrix M){
-  for (int i = 0; i < M.height; i++) {
-      double sum = 0;
-      double max = M.elements[i*M.width];
-      double min = M.elements[i*M.width];
-      for (int j = 0; j < M.width; j++) {
-          max = (M.elements[i*M.width+j] > max)? M.elements[i*M.width+j]: max;
-          min = (M.elements[i*M.width+j] < min)? M.elements[i*M.width+j]: min;
-      }
-      double mid = (max + min)/2;
-      for (int j = 0; j < M.width; j++) {
-          sum += exp(M.elements[i*M.width+j] - mid);
-      }
-      for (int j = 0; j < M.width; j++) {
-          M.elements[i*M.width+j] = exp(M.elements[i*M.width+j] - mid)/sum;
-      }
+  //行列Mにおけるどこを計算するスレッドか確定する。
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+
+  //計算が必要なスレッドか確認
+  if(row < M.height){
+    double sum = 0;
+    double max = M.elements[row*M.width];
+    double min = M.elements[row*M.width];
+    for (int j = 0; j < M.width; j++) {
+        max = (M.elements[row*M.width+j] > max)? M.elements[row*M.width+j]: max;
+        min = (M.elements[row*M.width+j] < min)? M.elements[row*M.width+j]: min;
+    }
+    double mid = (max + min)/2;
+    for (int j = 0; j < M.width; j++) {
+        sum += exp(M.elements[row*M.width+j] - mid);
+    }
+    for (int j = 0; j < M.width; j++) {
+        M.elements[row*M.width+j] = exp(M.elements[row*M.width+j] - mid)/sum;
+    }
   }
 }
 
 static void matrixSoftmax(matrix& d_m_in){
   //入力のサイズに合わせてブロックとグリッドの設定
-  dim3 blk(1, 1);
-  dim3 gld(1, 1);
+  dim3 blk(1, BLOCK_SIZE);
+  dim3 gld(1, (d_m_in.height-1+blk.y)/blk.y);
 
   matrixSoftmax_cuda<<<gld, blk>>>(d_m_in);
 }
@@ -562,6 +566,6 @@ void checkAll(){
   checkFunction3(matrixConstMul, 2,2,2);//最後の引数は倍率ß
 }
 
-// int main(){
-//   checkAll();
-// }
+//int main(){
+//  checkAll();
+//}

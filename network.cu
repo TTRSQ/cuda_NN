@@ -7,6 +7,9 @@
 #include <fstream>
 #include <map>
 
+#define MEAN_SQUARE 0
+#define SOFTMAX_CEE 1
+
 class matrix_set{
   bool host_f;
   bool device_f;
@@ -269,17 +272,18 @@ class network{
 public:
     std::vector<affine_relu> affine;
     softmax_cee softmax;
-    int input, hide, hide_neuron, output, mini_badge;
+    int input, hide, hide_neuron, output, mini_badge, err_system;
 
     network(){}
 
-    network(int _input, int _hide, int _hide_neuron, int _output, int _mini_badge){
+    network(int _input, int _hide, int _hide_neuron, int _output, int _mini_badge, int _err_system){
       //ホスト
         input = _input;
         hide = _hide;
         hide_neuron = _hide_neuron;
         output = _output;
         mini_badge = _mini_badge;
+        err_system = _err_system;
 
         std::random_device seed_gen;
         std::default_random_engine engine(seed_gen());
@@ -308,7 +312,7 @@ public:
         name = "NNpram/" + name + ".txt";
         std::ofstream outputfile(name);
 
-        outputfile << 7 << std::endl;
+        outputfile << 8 << std::endl;
         time_t ti = time(NULL);
         outputfile << ctime(&ti);
         outputfile << "input " << input << std::endl;
@@ -316,6 +320,7 @@ public:
         outputfile << "hide_neuron " << hide_neuron << std::endl;
         outputfile << "output " << output << std::endl;
         outputfile << "mini_badge " << mini_badge << std::endl;
+        outputfile << "err_system " << err_system << std::endl;
 
         outputfile << "affine " << affine.size() << std::endl;
         for (int i = 0; i < affine.size(); i++) {
@@ -380,6 +385,7 @@ public:
         hide_neuron = map.at("hide_neuron");
         output = map.at("output");
         mini_badge = map.at("mini_badge");
+        err_system = map.at("err_system");
         affine.resize(map.at("affine"));
 
         //affine
@@ -596,7 +602,8 @@ public:
           double err = calculate_error(in, teacher);
           double minierr = calculate_error(miniban, minians);
           std::cout << epock_n << " " << i << " " << err << " " << miniban.size() << " " << minierr << std::endl;
-          if(err < 0.01) exit(1);
+          
+          //if(err < 0.01) exit(1);
           g.point(epock_n+decimal, err);
           decimal += dx;
           std::vector<std::vector<double> >().swap(miniban);
