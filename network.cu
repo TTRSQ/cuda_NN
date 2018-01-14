@@ -561,8 +561,8 @@ public:
     void random_select(std::vector<std::vector<double> > &toin, std::vector<std::vector<double> > &toans,
        std::vector<std::vector<double> > &fromin, std::vector<std::vector<double> > &fromans){
 
-      double P = sqrt(fromin.size());
-      double threshold = RAND_MAX/P;
+      double P = double(mini_badge)/fromin.size();
+      double threshold = RAND_MAX*P;
 
       for(int i = 0; i < fromin.size(); i++){
         if(rand() < threshold){
@@ -570,6 +570,7 @@ public:
           toans.push_back(fromans[i]);
         }
       }
+      if(toin.size() == 0) random_select(toin, toans, fromin, fromans);
     }
 
     void lean_minibach(int epock, int itr, std::vector<std::vector<double> > &in, std::vector<std::vector<double> > &teacher){
@@ -578,7 +579,7 @@ public:
       g.open();
       g.screen(0, 0, epock, 2);
 
-      int n = int(sqrt(in.size()));
+      int n = int(double(in.size())/mini_badge);
       double dx = 1.0/n;
 
       for(int epock_n = 0; epock_n < epock; epock_n++){
@@ -593,9 +594,13 @@ public:
             leaning_adam(0.001, j+1);
           }
           double err = calculate_error(in, teacher);
-          std::cout << i << " " << err << std::endl;
+          double minierr = calculate_error(miniban, minians);
+          std::cout << epock_n << " " << i << " " << err << " " << miniban.size() << " " << minierr << std::endl;
+          if(err < 0.01) exit(1);
           g.point(epock_n+decimal, err);
           decimal += dx;
+          std::vector<std::vector<double> >().swap(miniban);
+          std::vector<std::vector<double> >().swap(minians);
         }
       }
       g.close();

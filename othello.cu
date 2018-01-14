@@ -206,7 +206,7 @@ public:
     }
 
     void make_initial(){
-        network n(128, 5, 128, 2, 300);
+        network n(128, 5, 128, 2, 100);
         net = n;
     }
 
@@ -600,7 +600,7 @@ void nn_vs_nn(int start_num, int end_num, string name){
 
         cout << "data = " << matban.size() << endl;
 
-        nr.net.lean_minibach(200, 200, matban, matans);
+        nr.net.lean_minibach(20, 200, matban, matans);
 
        int game_counter = 0;
        int col = wht;
@@ -632,7 +632,7 @@ void init(){
 int main(){
     init();
 
-    nn_vs_nn(1, 50, "test");
+    nn_vs_nn(2, 50, "test");
 
     return 0;
 }
