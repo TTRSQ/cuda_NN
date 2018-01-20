@@ -25,6 +25,25 @@ void printMatrix(matrix M){
   std::cout << std::endl;
 }
 
+__global__ void matrixZero_cuda(matrix M){
+  //行列Cにおけるどこを計算するスレッドか確定する。
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  int col = blockIdx.x*blockDim.x + threadIdx.x;
+
+  //計算が必要なスレッドか確認
+  if(row < M.height && col < M.width){
+    M.elements[row*M.width+col] = 0;
+  }
+}
+
+static void matrixZero(matrix& d_m_in){
+  //入力のサイズに合わせてブロックとグリッドの設定
+  dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 gld((d_m_in.width-1+blk.x)/blk.x, (d_m_in.height-1+blk.y)/blk.y);
+
+  matrixZero_cuda<<<gld, blk>>>(d_m_in);
+}
+
 __global__ void matrixCpy_cuda(matrix M, matrix org){
   //行列Cにおけるどこを計算するスレッドか確定する。
   int row = blockIdx.y*blockDim.y + threadIdx.y;
@@ -62,7 +81,7 @@ __global__ void matrixAdd_cuda(matrix M, matrix add){
 static void matrixAdd(matrix& d_m_in, matrix& d_m_ac){
   if(d_m_in.height != d_m_ac.height || d_m_in.width != d_m_ac.width){
     std::cout << "add err." << '\n';
-    return;
+    exit(1);
   }
   //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
@@ -85,7 +104,7 @@ __global__ void matrixMinus_cuda(matrix M, matrix minus){
 static void matrixMinus(matrix& d_m_in, matrix& d_m_ac){
   if(d_m_in.height != d_m_ac.height || d_m_in.width != d_m_ac.width){
     std::cout << "minus err." << '\n';
-    return;
+    exit(1);
   }
   //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
@@ -132,7 +151,7 @@ __global__ void matrixMul_cuda(matrix A, matrix B, matrix C){
 static void matrixMul(matrix& d_m_in, matrix& d_m_ac){
   if(d_m_in.width != d_m_ac.height){
     std::cout << "mul err." << '\n';
-    return;
+    exit(1);
   }
   //デバイスに演算結果の領域を確保
   matrix d_ans;
@@ -170,7 +189,7 @@ __global__ void matrixAddBias_cuda(matrix M, matrix bias){
 static void matrixAddBias(matrix& d_m_in, matrix& d_m_ac){
   if(d_m_in.width != d_m_ac.width){
     std::cout << "bias err." << '\n';
-    return;
+    exit(1);
   }
   //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
@@ -206,17 +225,25 @@ __global__ void matrixSoftmax_cuda(matrix M){
   if(row < M.height){
     double sum = 0;
     double max = M.elements[row*M.width];
-    double min = M.elements[row*M.width];
     for (int j = 0; j < M.width; j++) {
         max = (M.elements[row*M.width+j] > max)? M.elements[row*M.width+j]: max;
-        min = (M.elements[row*M.width+j] < min)? M.elements[row*M.width+j]: min;
-    }
-    double mid = (max + min)/2;
-    for (int j = 0; j < M.width; j++) {
-        sum += exp(M.elements[row*M.width+j] - mid);
     }
     for (int j = 0; j < M.width; j++) {
-        M.elements[row*M.width+j] = exp(M.elements[row*M.width+j] - mid)/sum;
+        sum += exp(M.elements[row*M.width+j] - max + 350);
+        if(isinf(sum)){
+          printf("softmax の分母がinf。\n");
+        }else if(isnan(sum)){
+          printf("softmax の分母がnan。\n");
+        }
+    }
+    for (int j = 0; j < M.width; j++) {
+      double bunshi = exp(M.elements[row*M.width+j] - max + 350);
+      if(isinf(bunshi)){
+        printf("softmax の分子がinf, value = %e\n", M.elements[row*M.width+j]);
+      }else if(isnan(bunshi)){
+        printf("softmax の分子がnan, value = %e\n", M.elements[row*M.width+j]);
+      }
+      M.elements[row*M.width+j] = bunshi/sum;
     }
   }
 }
@@ -243,7 +270,7 @@ __global__ void matrixReluWithOther_cuda(matrix M, matrix relufrom){
 static void matrixReluWithOther(matrix& d_m_in, matrix& d_m_ac){
   if(d_m_in.height != d_m_ac.height || d_m_in.width != d_m_ac.width){
     std::cout << "relu with other err." << '\n';
-    return;
+    exit(1);
   }
   //入力のサイズに合わせてブロックとグリッドの設定
   dim3 blk(BLOCK_SIZE, BLOCK_SIZE);
@@ -359,14 +386,14 @@ __global__ void matrixCrossE_cuda(matrix err, matrix result, matrix teacher){
   int idx = row*err.width+col;
   //計算が必要なスレッドか確認
   if(row < err.height && col < err.width){
-    err.elements[idx] = -teacher.elements[idx]*log(result.elements[idx]);
+    err.elements[idx] = (teacher.elements[idx] < 0.00000001)? 0: -teacher.elements[idx]*log(result.elements[idx]);
   }
 }
 
 static void matrixCrossE(matrix& err, matrix& result, matrix& teacher){
   if(result.height != teacher.height || result.width != teacher.width){
     std::cout << "cross ent err." << '\n';
-    return;
+    exit(1);
   }
   //デバイスに演算結果の領域を確保
   err.width = result.width; err.height = result.height;
@@ -379,7 +406,6 @@ static void matrixCrossE(matrix& err, matrix& result, matrix& teacher){
   dim3 gld((err.width-1+blk.x)/blk.x, (err.height-1+blk.y)/blk.y);
 
   matrixCrossE_cuda<<<gld, blk>>>(err, result, teacher);
-
 }
 
 __global__ void matrixAdam_cuda(double leaning_rate, int sequence, matrix ada_grad, matrix velocity_matrix, matrix prime_w_list, matrix w_list){

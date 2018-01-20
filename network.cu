@@ -49,6 +49,12 @@ public:
     host_f = true;
   }
 
+  void zeroAllDevice(){
+    if(device_f){
+      matrixZero(device);
+    }
+  }
+
   void deleteHost(){
     if(host_f){
       delete [] host.elements;
@@ -70,6 +76,18 @@ public:
       cudaFree(device.elements);
       device_f = false;
     }
+  }
+
+  void mallocBoth(){
+    //開放を含む処理に投げるとき用に適当に確保する。
+    if(!host_f){
+      host.elements = new double[1];
+    }
+    if(!device_f){
+      cudaMalloc((void**)&device.elements, sizeof(double));
+    }
+    host_f = true;
+    device_f = true;
   }
 
   void deleteBoth(){
@@ -102,8 +120,8 @@ public:
     matrix_set prime_w_list;
     matrix_set velocity_matrix;
     matrix_set ada_grad;
-    matrix_set relu_prime;
 
+    matrix_set relu_prime;
     matrix_set x_transpose;
 
     matrix_set bias;
@@ -133,7 +151,12 @@ public:
 
     void pull_from_cuda(){
       w_list.cpy_to_host();
+      ada_grad.cpy_to_host();
+      velocity_matrix.cpy_to_host();
+
       bias.cpy_to_host();
+      bias_ada_grad.cpy_to_host();
+      bias_velocity_matrix.cpy_to_host();
     }
 
     void purgeMem(){
@@ -145,14 +168,15 @@ public:
       bias_prime.deleteBoth();
       bias_velocity_matrix.deleteBoth();
       bias_ada_grad.deleteBoth();
+      x_transpose.deleteBoth();
     }
 
     void init_with_he(int h, int w, std::default_random_engine engine, std::normal_distribution<> dist){
       //ホストでの処理
       w_list.resizeHost(h, w);
-      prime_w_list.resizeHost(h, w);
-      velocity_matrix.resizeHost(h, w);
-      ada_grad.resizeHost(h, w);
+      prime_w_list.resizeHostWith0(h, w);
+      velocity_matrix.resizeHostWith0(h, w);
+      ada_grad.resizeHostWith0(h, w);
 
       double s = sqrt(2.0/h);
       for (int i = 0; i < h*w; i++) {
@@ -160,9 +184,9 @@ public:
       }
 
       bias.resizeHostWith0(1, w);
-      bias_prime.resizeHost(1, w);
-      bias_velocity_matrix.resizeHost(1, w);
-      bias_ada_grad.resizeHost(1, w);
+      bias_prime.resizeHostWith0(1, w);
+      bias_velocity_matrix.resizeHostWith0(1, w);
+      bias_ada_grad.resizeHostWith0(1, w);
 
       push_to_cuda();
     }
@@ -172,24 +196,20 @@ public:
       if(w_list.hostExist()){
         int h = w_list.host.height; int w = w_list.host.width;
         prime_w_list.resizeHostWith0(h, w);
-        velocity_matrix.resizeHostWith0(h, w);
-        ada_grad.resizeHostWith0(h, w);
-
         bias_prime.resizeHostWith0(1, w);
-        bias_velocity_matrix.resizeHostWith0(1, w);
-        bias_ada_grad.resizeHostWith0(1, w);
       }else{
         std::cout << "イニシャライズできませんでした。" << std::endl;
       }
-      push_to_cuda();
     }
 
     void forward(matrix &in){
       //デバイスでの処理
+        x_transpose.mallocBoth();
         matrixCpy(x_transpose.device, in);
         matrixTranspose(x_transpose.device);
         matrixMul(in, w_list.device);
         matrixAddBias(in, bias.device);
+
         matrixCpy(relu_prime.device, in);
         matrixRelu(in);
     }
@@ -208,6 +228,8 @@ public:
         matrixCpy(prime_w_list.device, x_transpose.device);
 
         matrix wtrans;
+        //2重開放しないよう一応確保しておく
+        cudaMalloc((void**)&wtrans.elements, sizeof(double));
         matrixCpy(wtrans, w_list.device);
         matrixTranspose(wtrans);
         matrixMul(in, wtrans);
@@ -238,12 +260,14 @@ public:
 
     void softmax_forward(matrix &in){
       //デバイス
+        x_transpose.mallocBoth();
         matrixCpy(x_transpose.device, in);
         matrixTranspose(x_transpose.device);
         matrixMul(in, w_list.device);
         matrixAddBias(in, bias.device);
         //- relu
         softmax(in);
+        softmax_output.mallocBoth();
         matrixCpy(softmax_output.device, in);
     }
 
@@ -261,6 +285,8 @@ public:
         matrixCpy(prime_w_list.device, x_transpose.device);
 
         matrix wtrans;
+        //2重開放しないよう一応確保しておく
+        cudaMalloc((void**)&wtrans.elements, sizeof(double));
         matrixCpy(wtrans, w_list.device);
         matrixTranspose(wtrans);
         matrixMul(in, wtrans);
@@ -312,7 +338,7 @@ public:
         name = "NNpram/" + name + ".txt";
         std::ofstream outputfile(name);
 
-        outputfile << 8 << std::endl;
+        outputfile << 7 << std::endl;
         time_t ti = time(NULL);
         outputfile << ctime(&ti);
         outputfile << "input " << input << std::endl;
@@ -322,41 +348,120 @@ public:
         outputfile << "mini_badge " << mini_badge << std::endl;
         outputfile << "err_system " << err_system << std::endl;
 
-        outputfile << "affine " << affine.size() << std::endl;
         for (int i = 0; i < affine.size(); i++) {
-            outputfile << affine[i].w_list.host.height << ' ' << affine[i].w_list.host.width << std::endl;
-            for (int j = 0; j < affine[i].w_list.host.height; j++) {
-                for (int k = 0; k < affine[i].w_list.host.width; k++) {
-                    if (k != 0) outputfile << ' ';
-                    outputfile << affine[i].w_list.host.elements[j*affine[i].w_list.host.width+k];
-                }
-                outputfile << std::endl;
-                if (j == affine[i].w_list.host.height - 1) {
-                    outputfile << "bias " << affine[i].bias.host.width << std::endl;
-                    for (int bia = 0; bia < affine[i].bias.host.width; bia++) {
-                        if(bia != 0) outputfile << ' ';
-                        outputfile << affine[i].bias.host.elements[bia];
-                    }
-                    outputfile << std::endl;
-                }
-            }
-        }
-        outputfile << "softmax" << std::endl;
-        outputfile << softmax.w_list.host.height << ' ' << softmax.w_list.host.width << std::endl;
-        for (int i = 0; i < softmax.w_list.host.height; i++) {
-            for (int j = 0; j < softmax.w_list.host.width; j++) {
-                if(j != 0) outputfile << ' ';
-                outputfile << softmax.w_list.host.elements[i*softmax.w_list.host.width+j];
+          outputfile << "affine " << affine[i].w_list.host.height << ' ' << affine[i].w_list.host.width << std::endl;
+
+          //w_list
+          outputfile << "w_list" << std::endl;
+          for (int row = 0; row < affine[i].w_list.host.height; row++) {
+            for (int col = 0; col < affine[i].w_list.host.width; col++) {
+              if (col != 0) outputfile << ' ';
+              outputfile << affine[i].w_list.host.elements[row*affine[i].w_list.host.width+col];
             }
             outputfile << std::endl;
+          }
+
+          //ada_grad
+          outputfile << "ada_grad" << std::endl;
+          for (int row = 0; row < affine[i].ada_grad.host.height; row++) {
+            for (int col = 0; col < affine[i].ada_grad.host.width; col++) {
+              if (col != 0) outputfile << ' ';
+              outputfile << affine[i].ada_grad.host.elements[row*affine[i].ada_grad.host.width+col];
+            }
+            outputfile << std::endl;
+          }
+
+          //velocity_matrix
+          outputfile << "velocity_matrix" << std::endl;
+          for (int row = 0; row < affine[i].velocity_matrix.host.height; row++) {
+            for (int col = 0; col < affine[i].velocity_matrix.host.width; col++) {
+              if (col != 0) outputfile << ' ';
+              outputfile << affine[i].velocity_matrix.host.elements[row*affine[i].velocity_matrix.host.width+col];
+            }
+            outputfile << std::endl;
+          }
+
+          //bias
+          outputfile << "bias_wlist" << std::endl;
+          for (int bia = 0; bia < affine[i].bias.host.width; bia++) {
+              if(bia != 0) outputfile << ' ';
+              outputfile << affine[i].bias.host.elements[bia];
+          }
+          outputfile << std::endl;
+
+          //ada_grad
+          outputfile << "bias_ada_grad" << std::endl;
+          for (int bia = 0; bia < affine[i].bias_ada_grad.host.width; bia++) {
+              if(bia != 0) outputfile << ' ';
+              outputfile << affine[i].bias_ada_grad.host.elements[bia];
+          }
+          outputfile << std::endl;
+
+          //velocity_matrix
+          outputfile << "bias_velocity_matrix" << std::endl;
+          for (int bia = 0; bia < affine[i].bias_velocity_matrix.host.width; bia++) {
+              if(bia != 0) outputfile << ' ';
+              outputfile << affine[i].bias_velocity_matrix.host.elements[bia];
+          }
+          outputfile << std::endl;
+        }
+        outputfile << "softmax " << softmax.w_list.host.height << ' ' << softmax.w_list.host.width << std::endl;
+
+        //w_list
+        outputfile << "w_list" << std::endl;
+        for (int row = 0; row < softmax.w_list.host.height; row++) {
+          for (int col = 0; col < softmax.w_list.host.width; col++) {
+            if (col != 0) outputfile << ' ';
+            outputfile << softmax.w_list.host.elements[row*softmax.w_list.host.width+col];
+          }
+          outputfile << std::endl;
         }
 
-        outputfile << "bias " << softmax.bias.host.width << std::endl;
+        //ada_grad
+        outputfile << "ada_grad" << std::endl;
+        for (int row = 0; row < softmax.ada_grad.host.height; row++) {
+          for (int col = 0; col < softmax.ada_grad.host.width; col++) {
+            if (col != 0) outputfile << ' ';
+            outputfile << softmax.ada_grad.host.elements[row*softmax.ada_grad.host.width+col];
+          }
+          outputfile << std::endl;
+        }
+
+        //velocity_matrix
+        outputfile << "velocity_matrix" << std::endl;
+        for (int row = 0; row < softmax.velocity_matrix.host.height; row++) {
+          for (int col = 0; col < softmax.velocity_matrix.host.width; col++) {
+            if (col != 0) outputfile << ' ';
+            outputfile << softmax.velocity_matrix.host.elements[row*softmax.velocity_matrix.host.width+col];
+          }
+          outputfile << std::endl;
+        }
+
+        //bias
+        outputfile << "bias_wlist" << std::endl;
         for (int bia = 0; bia < softmax.bias.host.width; bia++) {
             if(bia != 0) outputfile << ' ';
             outputfile << softmax.bias.host.elements[bia];
         }
+        outputfile << std::endl;
 
+        //ada_grad
+        outputfile << "bias_ada_grad" << std::endl;
+        for (int bia = 0; bia < softmax.bias_ada_grad.host.width; bia++) {
+            if(bia != 0) outputfile << ' ';
+            outputfile << softmax.bias_ada_grad.host.elements[bia];
+        }
+        outputfile << std::endl;
+
+        //velocity_matrix
+        outputfile << "bias_velocity_matrix" << std::endl;
+        for (int bia = 0; bia < softmax.bias_velocity_matrix.host.width; bia++) {
+            if(bia != 0) outputfile << ' ';
+            outputfile << softmax.bias_velocity_matrix.host.elements[bia];
+        }
+        outputfile << std::endl;
+
+        //メモリ解放
         purgeNet();
 
         outputfile.close();
@@ -386,63 +491,137 @@ public:
         output = map.at("output");
         mini_badge = map.at("mini_badge");
         err_system = map.at("err_system");
-        affine.resize(map.at("affine"));
+        affine.resize(map.at("hide"));
 
         //affine
-        for (int i = 0; i < map.at("affine"); i++) {
+        for (int i = 0; i < map.at("hide"); i++) {
             int h, w;
-            getline(inputfile, str);
+            getline(inputfile, str);//後ろ２つに行列のサイズが入る。
             buff = split(str, ' ');
-            h = std::stoi(buff[0]);
-            w = std::stoi(buff[1]);
+            h = std::stoi(buff[1]);
+            w = std::stoi(buff[2]);
+
+            getline(inputfile, str);//w_list
             affine[i].w_list.resizeHost(h, w);
-            for (int j = 0; j < h; j++) {
+            for (int row = 0; row < h; row++) {
                 getline(inputfile, str);
                 buff = split(str, ' ');
-                for (int k = 0; k < w; k++) {
-                    affine[i].w_list.host.elements[j*affine[i].w_list.host.width+k] = std::stod(buff[k]);
+                for (int col = 0; col < w; col++) {
+                    affine[i].w_list.host.elements[row*affine[i].w_list.host.width+col] = std::stod(buff[col]);
                 }
             }
-            //bias
+
+            getline(inputfile, str);//ada_grad
+            affine[i].ada_grad.resizeHost(h, w);
+            for (int row = 0; row < h; row++) {
+                getline(inputfile, str);
+                buff = split(str, ' ');
+                for (int col = 0; col < w; col++) {
+                    affine[i].ada_grad.host.elements[row*affine[i].ada_grad.host.width+col] = 0;//std::stod(buff[col]);
+                }
+            }
+
+            getline(inputfile, str);//velocity_matrix
+            affine[i].velocity_matrix.resizeHost(h, w);
+            for (int row = 0; row < h; row++) {
+                getline(inputfile, str);
+                buff = split(str, ' ');
+                for (int col = 0; col < w; col++) {
+                    affine[i].velocity_matrix.host.elements[row*affine[i].velocity_matrix.host.width+col] = 0;//std::stod(buff[col]);
+                }
+            }
+
+            getline(inputfile, str);//w_list
+            affine[i].bias.resizeHost(1, w);
             getline(inputfile, str);
             buff = split(str, ' ');
-            int biasnum = std::stoi(buff[1]);
-            affine[i].bias.resizeHost(1, biasnum);
-            affine[i].init_size();
-            getline(inputfile, str);
-            buff = split(str, ' ');
-            for (int j = 0; j < biasnum; j++) {
+            for (int j = 0; j < w; j++) {
                 affine[i].bias.host.elements[j] = std::stod(buff[j]);
             }
+
+            getline(inputfile, str);//ada_grad
+            affine[i].bias_ada_grad.resizeHost(1, w);
+            getline(inputfile, str);
+            buff = split(str, ' ');
+            for (int j = 0; j < w; j++) {
+                affine[i].bias_ada_grad.host.elements[j] = 0;//std::stod(buff[j]);
+            }
+
+            getline(inputfile, str);//velocity_matrix
+            affine[i].bias_velocity_matrix.resizeHost(1, w);
+            getline(inputfile, str);
+            buff = split(str, ' ');
+            for (int j = 0; j < w; j++) {
+                affine[i].bias_velocity_matrix.host.elements[j] = 0;//std::stod(buff[j]);
+            }
+
+            //primeのサイズを調整しgpuにコピー
+            affine[i].init_size();
             affine[i].push_to_cuda();
         }
-        getline(inputfile, str);
 
         //softmax
         int h, w;
-        getline(inputfile, str);
+        getline(inputfile, str);//後ろ２つに行列のサイズが入る。
         buff = split(str, ' ');
-        h = std::stoi(buff[0]);
-        w = std::stoi(buff[1]);
+        h = std::stoi(buff[1]);
+        w = std::stoi(buff[2]);
+
+        getline(inputfile, str);//w_list
         softmax.w_list.resizeHost(h, w);
-        for (int j = 0; j < h; j++) {
+        for (int row = 0; row < h; row++) {
             getline(inputfile, str);
             buff = split(str, ' ');
-            for (int k = 0; k < w; k++) {
-                softmax.w_list.host.elements[j*softmax.w_list.host.width+k] = std::stod(buff[k]);
+            for (int col = 0; col < w; col++) {
+                softmax.w_list.host.elements[row*softmax.w_list.host.width+col] = std::stod(buff[col]);
             }
         }
 
-        //bias
+        getline(inputfile, str);//ada_grad
+        softmax.ada_grad.resizeHost(h, w);
+        for (int row = 0; row < h; row++) {
+            getline(inputfile, str);
+            buff = split(str, ' ');
+            for (int col = 0; col < w; col++) {
+                softmax.ada_grad.host.elements[row*softmax.ada_grad.host.width+col] = 0;//std::stod(buff[col]);
+            }
+        }
+
+        getline(inputfile, str);//velocity_matrix
+        softmax.velocity_matrix.resizeHost(h, w);
+        for (int row = 0; row < h; row++) {
+            getline(inputfile, str);
+            buff = split(str, ' ');
+            for (int col = 0; col < w; col++) {
+                softmax.velocity_matrix.host.elements[row*softmax.velocity_matrix.host.width+col] = 0;//std::stod(buff[col]);
+            }
+        }
+
+        getline(inputfile, str);//w_list
+        softmax.bias.resizeHost(1, w);
         getline(inputfile, str);
         buff = split(str, ' ');
-        int biasnum = std::stoi(buff[1]);
-        softmax.bias.resizeHost(1, biasnum);
-        getline(inputfile, str);
-        buff = split(str, ' ');
-        for (int j = 0; j < biasnum; j++) {
+        for (int j = 0; j < w; j++) {
             softmax.bias.host.elements[j] = std::stod(buff[j]);
         }
+
+        getline(inputfile, str);//ada_grad
+        softmax.bias_ada_grad.resizeHost(1, w);
+        getline(inputfile, str);
+        buff = split(str, ' ');
+        for (int j = 0; j < w; j++) {
+            softmax.bias_ada_grad.host.elements[j] = 0;//std::stod(buff[j]);
+        }
+
+        getline(inputfile, str);//velocity_matrix
+        softmax.bias_velocity_matrix.resizeHost(1, w);
+        getline(inputfile, str);
+        buff = split(str, ' ');
+        for (int j = 0; j < w; j++) {
+            softmax.bias_velocity_matrix.host.elements[j] = 0;//std::stod(buff[j]);
+        }
+
+        //primeのサイズを調整しgpuにコピー
         softmax.init_size();
         softmax.push_to_cuda();
     }
@@ -585,7 +764,7 @@ public:
       g.open();
       g.screen(0, 0, epock, 2);
 
-      int n = int(double(in.size())/mini_badge);
+      int n = int(double(in.size())/mini_badge+0.5);
       double dx = 1.0/n;
 
       for(int epock_n = 0; epock_n < epock; epock_n++){
@@ -600,10 +779,10 @@ public:
             leaning_adam(0.001, j+1);
           }
           double err = calculate_error(in, teacher);
-          double minierr = calculate_error(miniban, minians);
-          std::cout << epock_n << " " << i << " " << err << " " << miniban.size() << " " << minierr << std::endl;
-          
-          //if(err < 0.01) exit(1);
+
+          if(i == n-1) std::cout << epock_n << "epock_err = " << err << ", size = " << miniban.size() << std::endl;
+          if(isnan(err)) exit(1);
+
           g.point(epock_n+decimal, err);
           decimal += dx;
           std::vector<std::vector<double> >().swap(miniban);

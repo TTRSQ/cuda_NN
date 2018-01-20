@@ -206,7 +206,7 @@ public:
     }
 
     void make_initial(){
-        network n(128, 5, 128, 2, 150, SOFTMAX_CEE);
+        network n(128, 5, 20, 2, 3000, SOFTMAX_CEE);
         net = n;
     }
 
@@ -474,7 +474,7 @@ void nn_vs_nn(int start_num, int end_num, string name){
         vector<ban_hist> win_and_d_hist;
         vector<ban_hist> lose_hist;
 
-        for (int i = 0; i < 80; i++) {
+        for (int i = 0; i < 90; i++) {
             vector<ban_hist> temp_blackhist;
             vector<ban_hist> temp_whitehist;
 
@@ -528,7 +528,7 @@ void nn_vs_nn(int start_num, int end_num, string name){
         int lose_counter = 0;
         int rand_color = wht;
         int rand_rate_count = 0;
-        while (lose_counter < 20) {
+        while (lose_counter < 10) {
             rand_rate_count++;
             vector<ban_hist> temp_blackhist;
             vector<ban_hist> temp_whitehist;
@@ -600,7 +600,7 @@ void nn_vs_nn(int start_num, int end_num, string name){
 
         cout << "data = " << matban.size() << endl;
 
-        nr.net.lean_minibach(20, 200, matban, matans);
+        nr.net.lean_minibach(10, 200, matban, matans);
 
        int game_counter = 0;
        int col = wht;
@@ -613,9 +613,8 @@ void nn_vs_nn(int start_num, int end_num, string name){
        g.line(sequence-1,prime,sequence,rate);
        prime = rate;
        nr.net.save_network(nn_name);
-       cout << "save ok" << endl;
-        clock_t end = clock();
-        std::cout << "sequence " << sequence << " end in " << (double)(end - start) / CLOCKS_PER_SEC << "sec." << std::endl;
+       clock_t end = clock();
+       std::cout << "sequence " << sequence << " end in " << (double)(end - start) / CLOCKS_PER_SEC << "sec." << std::endl;
     }
     string glaphname = "glaph/" + name + to_string(start_num) + "-" + to_string(end_num);
     g.save(glaphname.c_str());
@@ -632,7 +631,7 @@ void init(){
 int main(){
     init();
 
-    nn_vs_nn(1, 50, "test");
+    nn_vs_nn(1, 5, "test3_");
 
     return 0;
 }
