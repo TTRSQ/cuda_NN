@@ -1,1 +1,2 @@
-nn with cuda
+# cuda_NN
+cudaで高速化した行列計算を用いたNN処理系、正月にストーブの上で書いた。
